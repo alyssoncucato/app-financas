@@ -58,7 +58,7 @@ def render(user, conn_fin, c_fin, todas_categorias):
 
                 try:
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash', contents=prompt,
+                        model='gemini-3.6-flash', contents=prompt,
                         config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
                     )
                     dados = json.loads(response.text)
