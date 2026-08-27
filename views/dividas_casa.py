@@ -12,34 +12,29 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
 
-    # --- 1. BUSCA DADOS DOS ITENS DETALHADOS (PLANILHA) ---
+    # --- 1. BUSCA DADOS DA TABELA DE DÍVIDAS NO SUPABASE ---
     try:
         with engine.connect() as conn:
             df_div = pd.read_sql_query(
-                text("SELECT id, ano, gasto, descricao, valor_total, val_p1, val_p2, iva FROM controle_divida WHERE usuario = :usuario AND ano = :ano"),
+                text("SELECT id, ano, mes, gasto, descricao, valor_total, val_p1, val_p2, iva, valor, destino FROM controle_divida WHERE usuario = :usuario AND ano = :ano"),
                 conn,
                 params={"usuario": user, "ano": int(ano_s)}
             )
     except Exception:
         df_div = pd.DataFrame()
 
-    df_a = df_div[df_div['ano'] == int(ano_s)] if not df_div.empty else pd.DataFrame()
-
-    # O total da dívida fixa é a soma da coluna IVA dos itens detalhados
-    v_tot = df_a['iva'].sum() if not df_a.empty else 49555.81
-
-    # --- 2. BUSCA DADOS DOS PAGAMENTOS MENSAIS PARA A IVA ---
-    try:
-        with engine.connect() as conn:
-            df_mensal = pd.read_sql_query(
-                text("SELECT id, mes, valor, destino FROM pagamentos_iva WHERE usuario = :usuario AND ano = :ano"),
-                conn,
-                params={"usuario": user, "ano": int(ano_s)}
-            )
-    except Exception:
+    # Separa o que é detalhamento de gastos (onde 'gasto' não é pagamento mensal) e o que são os pagamentos mensais
+    if not df_div.empty:
+        df_gastos = df_div[df_div['gasto'] != 'PAGAMENTO_MENSAL']
+        df_mensal = df_div[df_div['gasto'] == 'PAGAMENTO_MENSAL']
+    else:
+        df_gastos = pd.DataFrame()
         df_mensal = pd.DataFrame()
 
-    # Soma tudo o que foi pago com destino "PIX IVA" ou "IVA" nos meses
+    # O total da dívida fixa é a soma da coluna IVA dos itens detalhados
+    v_tot = df_gastos['iva'].sum() if not df_gastos.empty else 49555.81
+
+    # Soma tudo o que foi pago nos meses com destino IVA ou PIX IVA
     if not df_mensal.empty:
         df_mensal['dest_clean'] = df_mensal['destino'].astype(str).str.strip().str.upper()
         t_pago = df_mensal[df_mensal['dest_clean'].isin(['PIX IVA', 'IVA'])]['valor'].sum()
@@ -59,7 +54,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 3. TABELA DE PAGAMENTOS MENSAIS PARA A IVA (EXIBIDA NA TELA) ---
+    # --- 2. TABELA DE PAGAMENTOS MENSAIS PARA A IVA (R$ 1.700 / mês) ---
     st.markdown("### 💳 Pagamentos Mensais para a IVA (Abatimento)")
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
@@ -72,7 +67,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
             t_mensal_tab.append({
                 "id": r.iloc[0]['id'],
                 "Mês": m,
-                "Valor (R$)": float(r.iloc[0]['valor']),
+                "Valor (R$)": float(r.iloc[0]['valor'] or 0.0),
                 "Destino": dest_opcao
             })
         else:
@@ -107,18 +102,18 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                         if pd.notna(r.get('id')):
                             if val > 0:
                                 connection.execute(
-                                    text("UPDATE pagamentos_iva SET valor = :val, destino = :dest WHERE id = :id AND usuario = :usuario"),
+                                    text("UPDATE controle_divida SET valor = :val, destino = :dest WHERE id = :id AND usuario = :usuario"),
                                     {"val": val, "dest": dest, "id": int(r['id']), "usuario": user}
                                 )
                             else:
                                 connection.execute(
-                                    text("DELETE FROM pagamentos_iva WHERE id = :id AND usuario = :usuario"),
+                                    text("DELETE FROM controle_divida WHERE id = :id AND usuario = :usuario"),
                                     {"id": int(r['id']), "usuario": user}
                                 )
                         else:
                             if val > 0:
                                 connection.execute(
-                                    text("INSERT INTO pagamentos_iva (usuario, ano, mes, valor, destino) VALUES (:usuario, :ano, :mes, :val, :dest)"),
+                                    text("INSERT INTO controle_divida (usuario, ano, mes, gasto, valor, destino) VALUES (:usuario, :ano, :mes, 'PAGAMENTO_MENSAL', :val, :dest)"),
                                     {"usuario": user, "ano": int(ano_s), "mes": r['Mês'], "val": val, "dest": dest}
                                 )
             st.success("Pagamentos mensais salvos com sucesso!")
@@ -128,7 +123,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 4. TABELA DE DETALHAMENTO DOS GASTOS (MODELO PLANILHA) ---
+    # --- 3. TABELA DE DETALHAMENTO DOS GASTOS (MODELO PLANILHA) ---
     st.markdown("### 📋 Detalhamento dos Gastos da Dívida")
     
     itens_padrao = [
@@ -146,7 +141,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     ]
 
     t_div_tab = []
-    if df_a.empty:
+    if df_gastos.empty:
         for gasto, desc, val, vp1, vp2, iva in itens_padrao:
             t_div_tab.append({
                 "id": None,
@@ -158,15 +153,15 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                 "IVA (R$)": iva
             })
     else:
-        for _, row in df_a.iterrows():
+        for _, row in df_gastos.iterrows():
             t_div_tab.append({
                 "id": row['id'],
                 "Gasto": row['gasto'],
                 "Descrição": row['descricao'],
-                "Valor Total (R$)": float(row['valor_total']),
-                f"{p1} (R$)": float(row['val_p1']),
-                f"{p2} (R$)": float(row['val_p2']),
-                "IVA (R$)": float(row['iva'])
+                "Valor Total (R$)": float(row['valor_total'] or 0.0),
+                f"{p1} (R$)": float(row['val_p1'] or 0.0),
+                f"{p2} (R$)": float(row['val_p2'] or 0.0),
+                "IVA (R$)": float(row['iva'] or 0.0)
             })
 
     ed_div = st.data_editor(
