@@ -12,7 +12,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
 
-    # --- 1. BUSCA DADOS DE TODOS OS ANOS PARA O CÁLCULO GLOBAL DE ABATIMENTO ---
+    # --- 1. BUSCA DADOS DE TODOS OS ANOS PARA O CÁLCULO GLOBAL DE ABATIMENTO (PAGAMENTOS MENSAIS) ---
     try:
         with engine.connect() as conn:
             df_div_all = pd.read_sql_query(
@@ -23,29 +23,75 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     except Exception:
         df_div_all = pd.DataFrame()
 
-    # Separa os pagamentos mensais de TODOS os anos para somar o total pago globalmente
     if not df_div_all.empty:
         df_mensal_all = df_div_all[df_div_all['mes'].notna() & (df_div_all['mes'].astype(str).str.strip() != "")]
     else:
         df_mensal_all = pd.DataFrame()
 
-    # SOMA GLOBAL: Acumula TUDO o que foi pago em 2025, 2026, etc., com destino IVA ou PIX IVA
     if not df_mensal_all.empty:
         df_mensal_all['dest_clean'] = df_mensal_all['destino'].astype(str).str.strip().str.upper()
         t_pago = df_mensal_all[df_mensal_all['dest_clean'].isin(['PIX IVA', 'IVA'])]['valor'].sum()
     else:
         t_pago = 0.0
 
-    # Valor da Doação fixa (20.000)
+    # --- 2. BUSCA ITENS DETALHADOS DA PLANILHA PARA O ANO SELECIONADO ---
+    try:
+        with engine.connect() as conn:
+            df_gastos_db = pd.read_sql_query(
+                text("SELECT id, ano, mes, gasto, descricao, valor_total, val_p1, val_p2, iva FROM controle_divida WHERE usuario = :usuario AND ano = :ano AND (mes IS NULL OR mes = '')"),
+                conn,
+                params={"usuario": user, "ano": int(ano_s)}
+            )
+    except Exception:
+        df_gastos_db = pd.DataFrame()
+
+    # Itens padrão iniciais caso a tabela esteja vazia
+    itens_padrao = [
+        ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
+        ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
+        ("IMPOSTO SALARIO ALYSSON", "IMPOSTO DO SALARIO ALYSSON PARA JACKSON", 1000.00, 1000.00, 0.0, 0.0),
+        ("VISTORIA", "VISTORIA DA CAIXA PARA AVALIAR A CASA", 750.00, 750.00, 0.0, 0.0),
+        ("CARTORIO", "ASSINATURA DA DECLARAÇÃO DE 1º IMOVEL", 29.30, 29.30, 0.0, 0.0),
+        ("ITBI", "IMPOSTO TRANSFERENCIA PREFEITURA", 2560.00, 0.0, 0.0, 2560.00),
+        ("CARTORIO", "TAXA DO REGISTRO DO CONTRATO", 5995.81, 0.0, 0.0, 5995.81),
+        ("PRIMEIRA ENTRADA", "VALOR DE ENTRADA DA CASA COMEÇO", 25500.00, 0.0, 0.0, 25500.00),
+        ("REAJUSTE ENTRADA", "VALOR QUE FALTOU NA ENTRADA DA CASA", 18500.00, 3000.00, 5000.00, 10500.00),
+        ("CAIXA", "SEGURO E TAXA DA CAIXA", 4978.99, 0.0, 0.0, 5000.00),
+        ("ELETRICISTA", "ELETRICA DA CASA - 220V E DISJUNTORES", 950.00, 950.00, 0.0, 0.0)
+    ]
+
+    t_div_tab = []
+    if df_gastos_db.empty:
+        for gasto, desc, val, vp1, vp2, iva in itens_padrao:
+            t_div_tab.append({
+                "id": None,
+                "Gasto": gasto,
+                "Descrição": desc,
+                "Valor Total (R$)": val,
+                f"{p1} (R$)": vp1,
+                f"{p2} (R$)": vp2,
+                "IVA (R$)": iva
+            })
+    else:
+        for _, row in df_gastos_db.iterrows():
+            t_div_tab.append({
+                "id": row['id'],
+                "Gasto": row['gasto'],
+                "Descrição": row['descricao'],
+                "Valor Total (R$)": float(row['valor_total'] or 0.0),
+                f"{p1} (R$)": float(row['val_p1'] or 0.0),
+                f"{p2} (R$)": float(row['val_p2'] or 0.0),
+                "IVA (R$)": float(row['iva'] or 0.0)
+            })
+
+    df_tabela_inicial = pd.DataFrame(t_div_tab)
+
+    # Cálculo dinâmico do total da dívida com base na coluna IVA dos itens da planilha
+    v_tot = df_tabela_inicial["IVA (R$)"].sum()
     v_doa = 20000.00
-    
-    # Dívida Total fixa padrão da planilha (49.555,81)
-    v_tot = 49555.81
-    
-    # Falta global abatendo todas as somas de todos os anos
     falta = v_tot - (t_pago + v_doa)
 
-    # Métricas Globais do Topo (Mostram o acumulado real total)
+    # Métricas Globais do Topo
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔴 Dívida Total (IVA)", f"R$ {v_tot:,.2f}")
     c2.metric("🟢 Pago Acumulado (IVA)", f"R$ {t_pago:,.2f}")
@@ -54,11 +100,10 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 2. TABELA DE PAGAMENTOS MENSAIS PARA A IVA (Filtrada para edição apenas no Ano Selecionado) ---
+    # --- 3. TABELA DE PAGAMENTOS MENSAIS PARA A IVA ---
     st.markdown(f"### 💳 Pagamentos Mensais para a IVA — Ano {ano_s}")
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
-    # Filtra apenas o ano selecionado para montar a tabela de edição da tela
     df_mensal_ano = df_mensal_all[df_mensal_all['ano'] == int(ano_s)] if not df_mensal_all.empty else pd.DataFrame()
 
     t_mensal_tab = []
@@ -126,36 +171,82 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 3. TABELA DE DETALHAMENTO DOS GASTOS (MODELO PLANILHA) ---
+    # --- 4. TABELA DE DETALHAMENTO DOS GASTOS (COM BOTÃO DE ADICIONAR LINHAS '+') ---
     st.markdown("### 📋 Detalhamento dos Gastos da Dívida")
-    st.info("💡 *Nota: Esta tabela exibe o resumo descritivo dos itens da planilha para o seu acompanhamento.*")
 
-    itens_padrao = [
-        ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
-        ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
-        ("IMPOSTO SALARIO ALYSSON", "IMPOSTO DO SALARIO ALYSSON PARA JACKSON", 1000.00, 1000.00, 0.0, 0.0),
-        ("VISTORIA", "VISTORIA DA CAIXA PARA AVALIAR A CASA", 750.00, 750.00, 0.0, 0.0),
-        ("CARTORIO", "ASSINATURA DA DECLARAÇÃO DE 1º IMOVEL", 29.30, 29.30, 0.0, 0.0),
-        ("ITBI", "IMPOSTO TRANSFERENCIA PREFEITURA", 2560.00, 0.0, 0.0, 2560.00),
-        ("CARTORIO", "TAXA DO REGISTRO DO CONTRATO", 5995.81, 0.0, 0.0, 5995.81),
-        ("PRIMEIRA ENTRADA", "VALOR DE ENTRADA DA CASA COMEÇO", 25500.00, 0.0, 0.0, 25500.00),
-        ("REAJUSTE ENTRADA", "VALOR QUE FALTOU NA ENTRADA DA CASA", 18500.00, 3000.00, 5000.00, 10500.00),
-        ("CAIXA", "SEGURO E TAXA DA CAIXA", 4978.99, 0.0, 0.0, 5000.00),
-        ("ELETRICISTA", "ELETRICA DA CASA - 220V E DISJUNTORES", 950.00, 950.00, 0.0, 0.0)
-    ]
+    # Editor interativo com num_rows="dynamic" para permitir adicionar novos itens com '+'
+    ed_div = st.data_editor(
+        df_tabela_inicial,
+        column_config={
+            "id": None,
+            "Gasto": st.column_config.TextColumn("Gasto"),
+            "Descrição": st.column_config.TextColumn("Descrição", width="large"),
+            "Valor Total (R$)": st.column_config.NumberColumn("Valor Total", format="R$ %.2f"),
+            f"{p1} (R$)": st.column_config.NumberColumn(p1, format="R$ %.2f"),
+            f"{p2} (R$)": st.column_config.NumberColumn(p2, format="R$ %.2f"),
+            "IVA (R$)": st.column_config.NumberColumn("IVA", format="R$ %.2f")
+        },
+        hide_index=True,
+        width="stretch",
+        num_rows="dynamic",
+        key=f"editor_dividas_{ano_s}"
+    )
 
-    t_div_tab = []
-    for gasto, desc, val, vp1, vp2, iva in itens_padrao:
-        t_div_tab.append({
-            "Gasto": gasto,
-            "Descrição": desc,
-            "Valor Total (R$)": val,
-            f"{p1} (R$)": vp1,
-            f"{p2} (R$)": vp2,
-            "IVA (R$)": iva
-        })
+    # --- RESUMO ANALÍTICO ENTRE A TABELA E O BOTÃO DE SALVAR ---
+    resumo_p1 = ed_div[f"{p1} (R$)"].sum() if f"{p1} (R$)" in ed_div.columns else 0.0
+    resumo_p2 = ed_div[f"{p2} (R$)"].sum() if f"{p2} (R$)" in ed_div.columns else 0.0
+    resumo_iva = ed_div["IVA (R$)"].sum() if "IVA (R$)" in ed_div.columns else 0.0
 
-    st.dataframe(pd.DataFrame(t_div_tab), hide_index=True, width="stretch")
+    st.markdown("")
+    rc1, rc2, rc3 = st.columns(3)
+    rc1.metric(f"🔵 Total Pago por {p1}", f"R$ {resumo_p1:,.2f}")
+    rc2.metric(f"🩷 Total Pago por {p2}", f"R$ {resumo_p2:,.2f}")
+    rc3.metric(f"🟡 Total Direto para IVA", f"R$ {resumo_iva:,.2f}")
+    st.markdown("")
+
+    if st.button("💾 Salvar Detalhamento dos Gastos", type="primary", key="btn_save_gastos"):
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    # IDs atuais na tela para controle de exclusão de linhas removidas no editor
+                    ids_atuais = [int(r['id']) for _, r in ed_div.iterrows() if pd.notna(r.get('id'))]
+                    
+                    # Apaga do banco registros antigos da planilha que foram removidos pelo usuário na tela
+                    if ids_atuais:
+                        connection.execute(
+                            text("DELETE FROM controle_divida WHERE usuario = :usuario AND ano = :ano AND (mes IS NULL OR mes = '') AND id NOT IN :ids"),
+                            {"usuario": user, "ano": int(ano_s), "ids": tuple(ids_atuais)}
+                        )
+                    else:
+                        connection.execute(
+                            text("DELETE FROM controle_divida WHERE usuario = :usuario AND ano = :ano AND (mes IS NULL OR mes = '')"),
+                            {"usuario": user, "ano": int(ano_s)}
+                        )
+
+                    for _, r in ed_div.iterrows():
+                        gasto = str(r['Gasto']) if pd.notna(r['Gasto']) else ""
+                        desc = str(r['Descrição']) if pd.notna(r['Descrição']) else ""
+                        val = float(r['Valor Total (R$)']) if pd.notna(r['Valor Total (R$)']) else 0.0
+                        vp1 = float(r[f"{p1} (R$)"]) if pd.notna(r[f"{p1} (R$)"]) else 0.0
+                        vp2 = float(r[f"{p2} (R$)"]) if pd.notna(r[f"{p2} (R$)"]) else 0.0
+                        iva = float(r['IVA (R$)']) if pd.notna(r['IVA (R$)']) else 0.0
+                        
+                        if pd.notna(r.get('id')):
+                            connection.execute(
+                                text("UPDATE controle_divida SET gasto = :gasto, descricao = :desc, valor_total = :val, val_p1 = :vp1, val_p2 = :vp2, iva = :iva WHERE id = :id AND usuario = :usuario"),
+                                {"gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva, "id": int(r['id']), "usuario": user}
+                            )
+                        else:
+                            if gasto.strip() or val > 0 or iva > 0:
+                                connection.execute(
+                                    text("INSERT INTO controle_divida (usuario, ano, gasto, descricao, valor_total, val_p1, val_p2, iva) VALUES (:usuario, :ano, :gasto, :desc, :val, :vp1, :vp2, :iva)"),
+                                    {"usuario": user, "ano": int(ano_s), "gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva}
+                                )
+            
+            st.success("Detalhamento dos gastos salvo com sucesso!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao salvar gastos: {e}")
 
 def render_casa(user, conn_proj, c_proj, get_param):
     t_casa = get_param(user, "casa_titulo", "CASA / FINANCIAMENTO")
