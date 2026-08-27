@@ -4,6 +4,16 @@ import pandas as pd
 def render(user, conn_fin, c_fin, todas_categorias):
     st.subheader("📋 Lançamentos e Edição")
 
+    # --- BOTÃO GLOBAL DE LIMPEZA ---
+    with st.expander("⚙️ Opções Avançadas / Limpeza de Dados", expanded=False):
+        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos salvos para o usuário atual permanentemente.")
+        if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
+            c_fin.execute("DELETE FROM transacoes WHERE usuario = ?", (user,))
+            st.success("Todos os lançamentos foram apagados com sucesso!")
+            st.rerun()
+
+    st.divider()
+
     # Criamos sub-abas para separar visualmente Conta Corrente e Cartão de Crédito
     tab_cc, tab_cartao, tab_todos = st.tabs(["🏦 Conta Corrente / Pix", "💳 Cartão de Crédito", "📁 Todos os Registros"])
 
@@ -23,20 +33,10 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 }, 
                 hide_index=True, 
                 width="stretch", 
-                num_rows="dynamic",
                 key="editor_cc"
             )
             
             if st.button("💾 Salvar Edições (Conta Corrente)", type="primary", key="btn_cc"):
-                ids_atuais = set(df_cc['id'].dropna().astype(int).tolist())
-                ids_editados = set(df_ed_cc['id'].dropna().astype(int).tolist()) if not df_ed_cc.empty else set()
-                ids_para_deletar = ids_atuais - ids_editados
-
-                # Deleta do banco os IDs que sumiram da tabela
-                for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
-
-                # Atualiza o restante
                 for _, r in df_ed_cc.iterrows():
                     if pd.notna(r.get('id')):
                         c_fin.execute(
@@ -69,18 +69,10 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 }, 
                 hide_index=True, 
                 width="stretch", 
-                num_rows="dynamic",
                 key="editor_cartao"
             )
             
             if st.button("💾 Salvar Edições (Cartão)", type="primary", key="btn_cartao"):
-                ids_atuais = set(df_cartao['id'].dropna().astype(int).tolist())
-                ids_editados = set(df_ed_cartao['id'].dropna().astype(int).tolist()) if not df_ed_cartao.empty else set()
-                ids_para_deletar = ids_atuais - ids_editados
-
-                for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
-
                 for _, r in df_ed_cartao.iterrows():
                     if pd.notna(r.get('id')):
                         c_fin.execute(
@@ -112,18 +104,10 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 }, 
                 hide_index=True, 
                 width="stretch", 
-                num_rows="dynamic",
                 key="editor_todos"
             )
             
             if st.button("💾 Salvar Edições (Todos)", type="primary", key="btn_todos"):
-                ids_atuais = set(df_all['id'].dropna().astype(int).tolist())
-                ids_editados = set(df_ed['id'].dropna().astype(int).tolist()) if not df_ed.empty else set()
-                ids_para_deletar = ids_atuais - ids_editados
-
-                for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
-
                 for _, r in df_ed.iterrows():
                     if pd.notna(r.get('id')):
                         c_fin.execute(
