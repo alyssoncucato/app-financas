@@ -19,18 +19,17 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 ids_editados_cc = set(df_ed_cc['id'].tolist()) if not df_ed_cc.empty else set()
                 ids_para_deletar = ids_atuais_cc - ids_editados_cc
 
-                # Deleta do banco o que foi removido na tela
+                # Deleta do banco usando parâmetros nomeados seguros para o Supabase
                 for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id=? AND usuario=?", (del_id, user))
+                    c_fin.execute("DELETE FROM transacoes WHERE id = :id AND usuario = :usuario", {"id": int(del_id), "usuario": user})
 
-                # Atualiza ou insere o restante
+                # Atualiza o restante
                 for _, r in df_ed_cc.iterrows():
                     c_fin.execute("UPDATE transacoes SET data=?, descricao=?, valor=?, categoria=? WHERE id=? AND usuario=?", 
                                   (r['data'], r['descricao'], r['valor'], r['categoria'], r['id'], user))
                     if r['descricao'] and r['categoria'] != "Ignorar":
                         c_fin.execute("INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", (user, str(r['descricao']).strip(), r['categoria']))
                 
-                conn_fin.commit()
                 st.success("Alterações salvas com sucesso!")
                 st.rerun()
         else:
@@ -48,9 +47,9 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 ids_editados_cartao = set(df_ed_cartao['id'].tolist()) if not df_ed_cartao.empty else set()
                 ids_para_deletar = ids_atuais_cartao - ids_editados_cartao
 
-                # Deleta do banco o que foi removido na tela
+                # Deleta do banco usando parâmetros nomeados seguros para o Supabase
                 for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id=? AND usuario=?", (del_id, user))
+                    c_fin.execute("DELETE FROM transacoes WHERE id = :id AND usuario = :usuario", {"id": int(del_id), "usuario": user})
 
                 # Atualiza o restante
                 for _, r in df_ed_cartao.iterrows():
@@ -59,7 +58,6 @@ def render(user, conn_fin, c_fin, todas_categorias):
                     if r['descricao'] and r['categoria'] != "Ignorar":
                         c_fin.execute("INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", (user, str(r['descricao']).strip(), r['categoria']))
                 
-                conn_fin.commit()
                 st.success("Alterações salvas com sucesso!")
                 st.rerun()
         else:
@@ -77,9 +75,9 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 ids_editados_all = set(df_ed['id'].tolist()) if not df_ed.empty else set()
                 ids_para_deletar = ids_atuais_all - ids_editados_all
 
-                # Deleta do banco o que foi removido na tela
+                # Deleta do banco usando parâmetros nomeados seguros para o Supabase
                 for del_id in ids_para_deletar:
-                    c_fin.execute("DELETE FROM transacoes WHERE id=? AND usuario=?", (del_id, user))
+                    c_fin.execute("DELETE FROM transacoes WHERE id = :id AND usuario = :usuario", {"id": int(del_id), "usuario": user})
 
                 # Atualiza o restante
                 for _, r in df_ed.iterrows():
@@ -88,7 +86,6 @@ def render(user, conn_fin, c_fin, todas_categorias):
                     if r['descricao'] and r['categoria'] != "Ignorar":
                         c_fin.execute("INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", (user, str(r['descricao']).strip(), r['categoria']))
                 
-                conn_fin.commit()
                 st.success("Salvo!")
                 st.rerun()
         else:
