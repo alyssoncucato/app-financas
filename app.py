@@ -10,6 +10,9 @@ st.set_page_config(page_title="Minhas Finanças", page_icon="💰", layout="wide
 # Inicializa as tabelas nos bancos de dados separados
 inicializar_bancos()
 
+# --- CARREGA A CHAVE DA IA DOS SECRETS ---
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "SUA_CHAVE_AQUI")
+
 CATEGORIAS_DESPESAS = [
     "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
     "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
@@ -100,7 +103,7 @@ abas_criadas = st.tabs(nomes_abas)
 
 idx = 0
 with abas_criadas[idx]: dashboard.render(user, conn_fin, CATEGORIAS_DESPESAS); idx += 1
-with abas_criadas[idx]: importacao.render(user, conn_fin, c_fin, TODAS_CATEGORIAS); idx += 1
+with abas_criadas[idx]: importacao.render(user, conn_fin, c_fin, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
 with abas_criadas[idx]: lancamentos.render(user, conn_fin, c_fin, TODAS_CATEGORIAS); idx += 1
 
 if tem_divida:

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import time
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Literal
@@ -24,9 +25,9 @@ class Transacao(BaseModel):
 class ExtratoProcessado(BaseModel):
     itens: List[Transacao]
 
-def render(user, conn_fin, c_fin, todas_categorias):
+def render(user, conn_fin, c_fin, todas_categorias, api_key):
     st.subheader("Lançar Extrato ou Fatura")
-    api_key = st.text_input("Gemini API Key (Google AI Studio)", type="password")
+
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
     arquivo_extrato = st.file_uploader("Faça upload (.csv, .ofx, .txt):", type=["csv", "ofx", "txt"])
     texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
@@ -38,8 +39,10 @@ def render(user, conn_fin, c_fin, todas_categorias):
         elif texto_fatura.strip():
             conteudo = texto_fatura
 
-        if not api_key or not conteudo:
-            st.warning("Forneça a API Key e o conteúdo.")
+        if not api_key or api_key == "SUA_CHAVE_AQUI":
+            st.error("A chave da API do Gemini não foi configurada corretamente nos Secrets do Streamlit Cloud.")
+        elif not conteudo:
+            st.warning("Forneça o conteúdo do arquivo ou cole o texto.")
         else:
             with st.spinner("A IA está analisando..."):
                 client = genai.Client(api_key=api_key)
@@ -59,10 +62,20 @@ def render(user, conn_fin, c_fin, todas_categorias):
                 """
 
                 try:
-                    response = client.models.generate_content(
-                        model='models/gemini-3.6-flash', contents=prompt,
-                        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
-                    )
+                    response = None
+                    for tentativa in range(3):
+                        try:
+                            response = client.models.generate_content(
+                                model='models/gemini-3.6-flash', contents=prompt,
+                                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
+                            )
+                            break
+                        except Exception as ex:
+                            if "503" in str(ex) and tentativa < 2:
+                                time.sleep(2)
+                                continue
+                            raise ex
+
                     dados = json.loads(response.text)
                     itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
                     
