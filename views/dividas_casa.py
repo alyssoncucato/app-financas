@@ -20,10 +20,10 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     except Exception:
         df_div = pd.DataFrame()
 
-    # REGRA: O valor pago só soma se o destino for exatamente "IVA" (ignorando maiúsculas/minúsculas)
+    # REGRA: O valor pago só soma se o destino for exatamente "PIX IVA" (ignorando maiúsculas/minúsculas)
     if not df_div.empty:
         df_div['destino_clean'] = df_div['destino'].astype(str).str.strip().str.upper()
-        t_pago = df_div[df_div['destino_clean'] == 'IVA']['valor'].sum()
+        t_pago = df_div[df_div['destino_clean'] == 'PIX IVA']['valor'].sum()
     else:
         t_pago = 0.0
 
@@ -31,7 +31,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔴 Total", f"R$ {v_tot:,.2f}")
-    c2.metric("🟢 Pago (IVA)", f"R$ {t_pago:,.2f}")
+    c2.metric("🟢 Pago (PIX IVA)", f"R$ {t_pago:,.2f}")
     c3.metric("🔵 Doação", f"R$ {v_doa:,.2f}")
     c4.metric("🟤 Falta", f"R$ {falta:,.2f}")
 
@@ -43,11 +43,18 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     for m in meses:
         r = df_a[df_a['mes'] == m] if not df_a.empty else pd.DataFrame()
         if not r.empty:
+            dest_atual = str(r.iloc[0]['destino'] or "").strip()
+            # Garante que se estiver salvo algo diferente, mapeie corretamente ou deixe vazio
+            if dest_atual.upper() not in ["PIX IVA", ""]:
+                dest_opcao = dest_atual
+            else:
+                dest_opcao = dest_atual.upper() if dest_atual else ""
+
             t_div_tab.append({
                 "id": r.iloc[0]['id'], 
                 "Mês": m, 
                 "Valor (R$)": float(r.iloc[0]['valor']),
-                "Destino": str(r.iloc[0]['destino'] or "")
+                "Destino": dest_opcao
             })
         else:
             t_div_tab.append({
@@ -65,7 +72,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
             "id": None, 
             "Mês": st.column_config.TextColumn("Mês", disabled=True),
             "Valor (R$)": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            "Destino": st.column_config.TextColumn("Destino")
+            "Destino": st.column_config.SelectboxColumn("Destino", options=["", "PIX IVA"])
         }, 
         hide_index=True, 
         width="stretch",
