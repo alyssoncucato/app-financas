@@ -12,27 +12,27 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
 
-    # --- 1. BUSCA DADOS DA TABELA DE DÍVIDAS NO SUPABASE ---
+    # --- 1. BUSCA DADOS DE TODOS OS ANOS PARA O CÁLCULO GLOBAL DE ABATIMENTO ---
     try:
         with engine.connect() as conn:
-            df_div = pd.read_sql_query(
-                text("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = :usuario AND ano = :ano"),
+            df_div_all = pd.read_sql_query(
+                text("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = :usuario"),
                 conn,
-                params={"usuario": user, "ano": int(ano_s)}
+                params={"usuario": user}
             )
     except Exception:
-        df_div = pd.DataFrame()
+        df_div_all = pd.DataFrame()
 
-    # Os pagamentos mensais possuem o campo 'mes' preenchido (JANEIRO, FEVEREIRO...)
-    if not df_div.empty:
-        df_mensal = df_div[df_div['mes'].notna() & (df_div['mes'].astype(str).str.strip() != "")]
+    # Separa os pagamentos mensais de TODOS os anos para somar o total pago globalmente
+    if not df_div_all.empty:
+        df_mensal_all = df_div_all[df_div_all['mes'].notna() & (df_div_all['mes'].astype(str).str.strip() != "")]
     else:
-        df_mensal = pd.DataFrame()
+        df_mensal_all = pd.DataFrame()
 
-    # Soma tudo o que foi pago nos meses com destino IVA ou PIX IVA
-    if not df_mensal.empty:
-        df_mensal['dest_clean'] = df_mensal['destino'].astype(str).str.strip().str.upper()
-        t_pago = df_mensal[df_mensal['dest_clean'].isin(['PIX IVA', 'IVA'])]['valor'].sum()
+    # SOMA GLOBAL: Acumula TUDO o que foi pago em 2025, 2026, etc., com destino IVA ou PIX IVA
+    if not df_mensal_all.empty:
+        df_mensal_all['dest_clean'] = df_mensal_all['destino'].astype(str).str.strip().str.upper()
+        t_pago = df_mensal_all[df_mensal_all['dest_clean'].isin(['PIX IVA', 'IVA'])]['valor'].sum()
     else:
         t_pago = 0.0
 
@@ -41,24 +41,29 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     
     # Dívida Total fixa padrão da planilha (49.555,81)
     v_tot = 49555.81
+    
+    # Falta global abatendo todas as somas de todos os anos
     falta = v_tot - (t_pago + v_doa)
 
-    # Métricas Globais do Topo
+    # Métricas Globais do Topo (Mostram o acumulado real total)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔴 Dívida Total (IVA)", f"R$ {v_tot:,.2f}")
-    c2.metric("🟢 Pago (IVA Mensal)", f"R$ {t_pago:,.2f}")
+    c2.metric("🟢 Pago Acumulado (IVA)", f"R$ {t_pago:,.2f}")
     c3.metric("🔵 Doação", f"R$ {v_doa:,.2f}")
-    c4.metric("🟤 Falta", f"R$ {falta:,.2f}")
+    c4.metric("🟤 Falta Geral", f"R$ {falta:,.2f}")
 
     st.divider()
 
-    # --- 2. TABELA DE PAGAMENTOS MENSAIS PARA A IVA (R$ 1.700 / mês) ---
-    st.markdown("### 💳 Pagamentos Mensais para a IVA (Abatimento)")
+    # --- 2. TABELA DE PAGAMENTOS MENSAIS PARA A IVA (Filtrada para edição apenas no Ano Selecionado) ---
+    st.markdown(f"### 💳 Pagamentos Mensais para a IVA — Ano {ano_s}")
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
+    # Filtra apenas o ano selecionado para montar a tabela de edição da tela
+    df_mensal_ano = df_mensal_all[df_mensal_all['ano'] == int(ano_s)] if not df_mensal_all.empty else pd.DataFrame()
+
     t_mensal_tab = []
     for m in meses:
-        r = df_mensal[df_mensal['mes'].astype(str).str.strip().str.upper() == m] if not df_mensal.empty else pd.DataFrame()
+        r = df_mensal_ano[df_mensal_ano['mes'].astype(str).str.strip().str.upper() == m] if not df_mensal_ano.empty else pd.DataFrame()
         if not r.empty:
             dest_atual = str(r.iloc[0]['destino'] or "").strip()
             dest_opcao = dest_atual.upper() if dest_atual.upper() in ["PIX IVA", "IVA"] else ("PIX IVA" if dest_atual else "")
@@ -89,7 +94,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         key=f"editor_mensal_{ano_s}"
     )
 
-    if st.button("💾 Salvar Pagamentos Mensais", type="primary", key="btn_save_mensal"):
+    if st.button(f"💾 Salvar Pagamentos de {ano_s}", type="primary", key="btn_save_mensal"):
         try:
             with engine.connect() as connection:
                 with connection.begin():
@@ -114,7 +119,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                                     text("INSERT INTO controle_divida (usuario, ano, mes, valor, destino) VALUES (:usuario, :ano, :mes, :val, :dest)"),
                                     {"usuario": user, "ano": int(ano_s), "mes": r['Mês'], "val": val, "dest": dest}
                                 )
-            st.success("Pagamentos mensais salvos com sucesso!")
+            st.success(f"Pagamentos de {ano_s} salvos com sucesso!")
             st.rerun()
         except Exception as e:
             st.error(f"Erro ao salvar pagamentos mensais: {e}")
