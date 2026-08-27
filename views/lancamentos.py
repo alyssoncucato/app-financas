@@ -1,16 +1,26 @@
 import streamlit as st
 import pandas as pd
+from database import engine
+from sqlalchemy import text
 
 def render(user, conn_fin, c_fin, todas_categorias):
     st.subheader("📋 Lançamentos e Edição")
 
-    # --- BOTÃO GLOBAL DE LIMPEZA ---
+    # --- BOTÃO GLOBAL DE LIMPEZA DIRETO NO ENGINE ---
     with st.expander("⚙️ Opções Avançadas / Limpeza de Dados", expanded=False):
         st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos salvos para o usuário atual permanentemente.")
         if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
-            c_fin.execute("DELETE FROM transacoes WHERE usuario = ?", (user,))
-            st.success("Todos os lançamentos foram apagados com sucesso!")
-            st.rerun()
+            try:
+                with engine.connect() as connection:
+                    with connection.begin():
+                        connection.execute(
+                            text("DELETE FROM transacoes WHERE usuario = :usuario"),
+                            {"usuario": user}
+                        )
+                st.success("Todos os lançamentos foram apagados com sucesso do Supabase!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao apagar registros: {e}")
 
     st.divider()
 
