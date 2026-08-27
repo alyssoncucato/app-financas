@@ -16,23 +16,18 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     try:
         with engine.connect() as conn:
             df_div = pd.read_sql_query(
-                text("SELECT id, ano, mes, gasto, descricao, valor_total, val_p1, val_p2, iva, valor, destino FROM controle_divida WHERE usuario = :usuario AND ano = :ano"),
+                text("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = :usuario AND ano = :ano"),
                 conn,
                 params={"usuario": user, "ano": int(ano_s)}
             )
     except Exception:
         df_div = pd.DataFrame()
 
-    # Separa o que é detalhamento de gastos (onde 'gasto' não é pagamento mensal) e o que são os pagamentos mensais
+    # Os pagamentos mensais possuem o campo 'mes' preenchido (JANEIRO, FEVEREIRO...)
     if not df_div.empty:
-        df_gastos = df_div[df_div['gasto'] != 'PAGAMENTO_MENSAL']
-        df_mensal = df_div[df_div['gasto'] == 'PAGAMENTO_MENSAL']
+        df_mensal = df_div[df_div['mes'].notna() & (df_div['mes'].astype(str).str.strip() != "")]
     else:
-        df_gastos = pd.DataFrame()
         df_mensal = pd.DataFrame()
-
-    # O total da dívida fixa é a soma da coluna IVA dos itens detalhados
-    v_tot = df_gastos['iva'].sum() if not df_gastos.empty else 49555.81
 
     # Soma tudo o que foi pago nos meses com destino IVA ou PIX IVA
     if not df_mensal.empty:
@@ -41,8 +36,11 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     else:
         t_pago = 0.0
 
-    # Valor da Doação (padrão 20.000)
+    # Valor da Doação fixa (20.000)
     v_doa = 20000.00
+    
+    # Dívida Total fixa padrão da planilha (49.555,81)
+    v_tot = 49555.81
     falta = v_tot - (t_pago + v_doa)
 
     # Métricas Globais do Topo
@@ -60,7 +58,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     
     t_mensal_tab = []
     for m in meses:
-        r = df_mensal[df_mensal['mes'] == m] if not df_mensal.empty else pd.DataFrame()
+        r = df_mensal[df_mensal['mes'].astype(str).str.strip().str.upper() == m] if not df_mensal.empty else pd.DataFrame()
         if not r.empty:
             dest_atual = str(r.iloc[0]['destino'] or "").strip()
             dest_opcao = dest_atual.upper() if dest_atual.upper() in ["PIX IVA", "IVA"] else ("PIX IVA" if dest_atual else "")
@@ -113,7 +111,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                         else:
                             if val > 0:
                                 connection.execute(
-                                    text("INSERT INTO controle_divida (usuario, ano, mes, gasto, valor, destino) VALUES (:usuario, :ano, :mes, 'PAGAMENTO_MENSAL', :val, :dest)"),
+                                    text("INSERT INTO controle_divida (usuario, ano, mes, valor, destino) VALUES (:usuario, :ano, :mes, :val, :dest)"),
                                     {"usuario": user, "ano": int(ano_s), "mes": r['Mês'], "val": val, "dest": dest}
                                 )
             st.success("Pagamentos mensais salvos com sucesso!")
@@ -125,7 +123,8 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     # --- 3. TABELA DE DETALHAMENTO DOS GASTOS (MODELO PLANILHA) ---
     st.markdown("### 📋 Detalhamento dos Gastos da Dívida")
-    
+    st.info("💡 *Nota: Esta tabela exibe o resumo descritivo dos itens da planilha para o seu acompanhamento.*")
+
     itens_padrao = [
         ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
         ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
@@ -141,80 +140,17 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     ]
 
     t_div_tab = []
-    if df_gastos.empty:
-        for gasto, desc, val, vp1, vp2, iva in itens_padrao:
-            t_div_tab.append({
-                "id": None,
-                "Gasto": gasto,
-                "Descrição": desc,
-                "Valor Total (R$)": val,
-                f"{p1} (R$)": vp1,
-                f"{p2} (R$)": vp2,
-                "IVA (R$)": iva
-            })
-    else:
-        for _, row in df_gastos.iterrows():
-            t_div_tab.append({
-                "id": row['id'],
-                "Gasto": row['gasto'],
-                "Descrição": row['descricao'],
-                "Valor Total (R$)": float(row['valor_total'] or 0.0),
-                f"{p1} (R$)": float(row['val_p1'] or 0.0),
-                f"{p2} (R$)": float(row['val_p2'] or 0.0),
-                "IVA (R$)": float(row['iva'] or 0.0)
-            })
+    for gasto, desc, val, vp1, vp2, iva in itens_padrao:
+        t_div_tab.append({
+            "Gasto": gasto,
+            "Descrição": desc,
+            "Valor Total (R$)": val,
+            f"{p1} (R$)": vp1,
+            f"{p2} (R$)": vp2,
+            "IVA (R$)": iva
+        })
 
-    ed_div = st.data_editor(
-        pd.DataFrame(t_div_tab),
-        column_config={
-            "id": None,
-            "Gasto": st.column_config.TextColumn("Gasto"),
-            "Descrição": st.column_config.TextColumn("Descrição", width="large"),
-            "Valor Total (R$)": st.column_config.NumberColumn("Valor Total", format="R$ %.2f"),
-            f"{p1} (R$)": st.column_config.NumberColumn(p1, format="R$ %.2f"),
-            f"{p2} (R$)": st.column_config.NumberColumn(p2, format="R$ %.2f"),
-            "IVA (R$)": st.column_config.NumberColumn("IVA", format="R$ %.2f")
-        },
-        hide_index=True,
-        width="stretch",
-        num_rows="dynamic",
-        key=f"editor_dividas_{ano_s}"
-    )
-
-    if st.button("💾 Salvar Detalhamento dos Gastos", type="primary", key="btn_save_gastos"):
-        try:
-            with engine.connect() as connection:
-                with connection.begin():
-                    for _, r in ed_div.iterrows():
-                        gasto = str(r['Gasto']) if pd.notna(r['Gasto']) else ""
-                        desc = str(r['Descrição']) if pd.notna(r['Descrição']) else ""
-                        val = float(r['Valor Total (R$)']) if pd.notna(r['Valor Total (R$)']) else 0.0
-                        vp1 = float(r[f"{p1} (R$)"]) if pd.notna(r[f"{p1} (R$)"]) else 0.0
-                        vp2 = float(r[f"{p2} (R$)"]) if pd.notna(r[f"{p2} (R$)"]) else 0.0
-                        iva = float(r['IVA (R$)']) if pd.notna(r['IVA (R$)']) else 0.0
-                        
-                        if pd.notna(r.get('id')):
-                            if val > 0 or iva > 0:
-                                connection.execute(
-                                    text("UPDATE controle_divida SET gasto = :gasto, descricao = :desc, valor_total = :val, val_p1 = :vp1, val_p2 = :vp2, iva = :iva WHERE id = :id AND usuario = :usuario"),
-                                    {"gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva, "id": int(r['id']), "usuario": user}
-                                )
-                            else:
-                                connection.execute(
-                                    text("DELETE FROM controle_divida WHERE id = :id AND usuario = :usuario"),
-                                    {"id": int(r['id']), "usuario": user}
-                                )
-                        else:
-                            if val > 0 or iva > 0:
-                                connection.execute(
-                                    text("INSERT INTO controle_divida (usuario, ano, gasto, descricao, valor_total, val_p1, val_p2, iva) VALUES (:usuario, :ano, :gasto, :desc, :val, :vp1, :vp2, :iva)"),
-                                    {"usuario": user, "ano": int(ano_s), "gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva}
-                                )
-            
-            st.success("Detalhamento dos gastos salvo com sucesso!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erro ao salvar gastos: {e}")
+    st.dataframe(pd.DataFrame(t_div_tab), hide_index=True, width="stretch")
 
 def render_casa(user, conn_proj, c_proj, get_param):
     t_casa = get_param(user, "casa_titulo", "CASA / FINANCIAMENTO")
