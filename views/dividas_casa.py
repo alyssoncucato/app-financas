@@ -6,96 +6,115 @@ from sqlalchemy import text
 def render_divida(user, conn_proj, c_proj, get_param, set_param):
     t_div = get_param(user, "divida_titulo", "DÍVIDA FIXA")
     st.subheader(f"📌 {t_div}")
-    v_tot = float(get_param(user, "valor_total", "50005.81"))
-    v_doa = float(get_param(user, "doacao", "20000.00"))
-    
-    # Busca dados direto com a engine segura
+
+    # Participantes (Alysson e Isabela)
+    p1 = get_param(user, "participante_1", "Alysson")
+    p2 = get_param(user, "participante_2", "Isabela")
+
+    # Busca os lançamentos detalhados da dívida fixa no banco
     try:
         with engine.connect() as conn:
             df_div = pd.read_sql_query(
-                text("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = :usuario"),
+                text("SELECT id, ano, gasto, descricao, valor_total, val_p1, val_p2, iva FROM controle_divida WHERE usuario = :usuario"),
                 conn,
                 params={"usuario": user}
             )
     except Exception:
         df_div = pd.DataFrame()
 
-    # REGRA: O valor pago só soma se o destino for exatamente "PIX IVA" (ignorando maiúsculas/minúsculas)
-    if not df_div.empty:
-        df_div['destino_clean'] = df_div['destino'].astype(str).str.strip().str.upper()
-        t_pago = df_div[df_div['destino_clean'] == 'PIX IVA']['valor'].sum()
-    else:
-        t_pago = 0.0
-
-    falta = v_tot - (t_pago + v_doa)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🔴 Total", f"R$ {v_tot:,.2f}")
-    c2.metric("🟢 Pago (PIX IVA)", f"R$ {t_pago:,.2f}")
-    c3.metric("🔵 Doação", f"R$ {v_doa:,.2f}")
-    c4.metric("🟤 Falta", f"R$ {falta:,.2f}")
-
-    # Seletor de Ano (ao mudar, limpa a chave do editor para forçar o recarregamento correto)
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
     
-    # Filtra estritamente pelo ano selecionado
+    # Filtra pelo ano selecionado
     df_a = df_div[df_div['ano'] == int(ano_s)] if not df_div.empty else pd.DataFrame()
-    meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
-    
+
+    # Totais gerais baseados na planilha (Soma da coluna IVA como dívida total, e o que cada um pagou)
+    v_iva_tot = df_a['iva'].sum() if not df_a.empty else 49555.81
+    v_p1_tot = df_a['val_p1'].sum() if not df_a.empty else 0.0
+    v_p2_tot = df_a['val_p2'].sum() if not df_a.empty else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🔴 Dívida Total (IVA)", f"R$ {v_iva_tot:,.2f}")
+    c2.metric(f"🔵 Pago - {p1}", f"R$ {v_p1_tot:,.2f}")
+    c3.metric(f"🩷 Pago - {p2}", f"R$ {v_p2_tot:,.2f}")
+    c4.metric("⚖️ Geral Itens", f"R$ {df_a['valor_total'].sum() if not df_a.empty else 0.0:,.2f}")
+
+    st.markdown("### Detalhamento dos Gastos (Modelo Planilha)")
+
+    # Itens padrão sugeridos caso a tabela esteja vazia para o ano
+    itens_padrao = [
+        ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
+        ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
+        ("IMPOSTO SALARIO ALYSSON", "IMPOSTO DO SALARIO ALYSSON PARA JACKSON", 1000.00, 1000.00, 0.0, 0.0),
+        ("VISTORIA", "VISTORIA DA CAIXA PARA AVALIAR A CASA", 750.00, 750.00, 0.0, 0.0),
+        ("CARTORIO", "ASSINATURA DA DECLARAÇÃO DE 1º IMOVEL", 29.30, 29.30, 0.0, 0.0),
+        ("ITBI", "IMPOSTO TRANSFERENCIA PREFEITURA", 2560.00, 0.0, 0.0, 2560.00),
+        ("CARTORIO", "TAXA DO REGISTRO DO CONTRATO", 5995.81, 0.0, 0.0, 5995.81),
+        ("PRIMEIRA ENTRADA", "VALOR DE ENTRADA DA CASA COMEÇO", 25500.00, 0.0, 0.0, 25500.00),
+        ("REAJUSTE ENTRADA", "VALOR QUE FALTOU NA ENTRADA DA CASA", 18500.00, 3000.00, 5000.00, 10500.00),
+        ("CAIXA", "SEGURO E TAXA DA CAIXA", 4978.99, 0.0, 0.0, 5000.00),
+        ("ELETRICISTA", "ELETRICA DA CASA - 220V E DISJUNTORES", 950.00, 950.00, 0.0, 0.0)
+    ]
+
     t_div_tab = []
-    for m in meses:
-        r = df_a[df_a['mes'] == m] if not df_a.empty else pd.DataFrame()
-        if not r.empty:
-            dest_atual = str(r.iloc[0]['destino'] or "").strip()
-            if dest_atual.upper() not in ["PIX IVA", ""]:
-                dest_opcao = dest_atual
-            else:
-                dest_opcao = dest_atual.upper() if dest_atual else ""
-
+    if df_a.empty:
+        for gasto, desc, val, vp1, vp2, iva in itens_padrao:
             t_div_tab.append({
-                "id": r.iloc[0]['id'], 
-                "Mês": m, 
-                "Valor (R$)": float(r.iloc[0]['valor']),
-                "Destino": dest_opcao
+                "id": None,
+                "Gasto": gasto,
+                "Descrição": desc,
+                "Valor Total (R$)": val,
+                f"{p1} (R$)": vp1,
+                f"{p2} (R$)": vp2,
+                "IVA (R$)": iva
             })
-        else:
-            # Se não houver registro para este mês neste ano, vem zerado e limpo!
+    else:
+        for _, row in df_a.iterrows():
             t_div_tab.append({
-                "id": None, 
-                "Mês": m, 
-                "Valor (R$)": 0.0,
-                "Destino": ""
+                "id": row['id'],
+                "Gasto": row['gasto'],
+                "Descrição": row['descricao'],
+                "Valor Total (R$)": float(row['valor_total']),
+                f"{p1} (R$)": float(row['val_p1']),
+                f"{p2} (R$)": float(row['val_p2']),
+                "IVA (R$)": float(row['iva'])
             })
 
-    df_tabela = pd.DataFrame(t_div_tab)[["id", "Mês", "Valor (R$)", "Destino"]]
+    df_tabela = pd.DataFrame(t_div_tab)
 
-    # Chave dinâmica baseada no ano para o Streamlit recriar o editor limpo ao trocar de ano
     ed_div = st.data_editor(
-        df_tabela, 
+        df_tabela,
         column_config={
-            "id": None, 
-            "Mês": st.column_config.TextColumn("Mês", disabled=True),
-            "Valor (R$)": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            "Destino": st.column_config.SelectboxColumn("Destino", options=["", "PIX IVA"])
-        }, 
-        hide_index=True, 
+            "id": None,
+            "Gasto": st.column_config.TextColumn("Gasto"),
+            "Descrição": st.column_config.TextColumn("Descrição", width="large"),
+            "Valor Total (R$)": st.column_config.NumberColumn("Valor Total", format="R$ %.2f"),
+            f"{p1} (R$)": st.column_config.NumberColumn(p1, format="R$ %.2f"),
+            f"{p2} (R$)": st.column_config.NumberColumn(p2, format="R$ %.2f"),
+            "IVA (R$)": st.column_config.NumberColumn("IVA", format="R$ %.2f")
+        },
+        hide_index=True,
         width="stretch",
+        num_rows="dynamic",
         key=f"editor_dividas_{ano_s}"
     )
 
-    if st.button("💾 Salvar Dívida", type="primary"):
+    if st.button("💾 Salvar Dívida Fixa", type="primary"):
         try:
             with engine.connect() as connection:
                 with connection.begin():
                     for _, r in ed_div.iterrows():
-                        val = float(r['Valor (R$)']) if pd.notna(r['Valor (R$)']) else 0.0
-                        dest = str(r['Destino']) if pd.notna(r['Destino']) else ""
+                        gasto = str(r['Gasto']) if pd.notna(r['Gasto']) else ""
+                        desc = str(r['Descrição']) if pd.notna(r['Descrição']) else ""
+                        val = float(r['Valor Total (R$)']) if pd.notna(r['Valor Total (R$)']) else 0.0
+                        vp1 = float(r[f"{p1} (R$)"]) if pd.notna(r[f"{p1} (R$)"]) else 0.0
+                        vp2 = float(r[f"{p2} (R$)"]) if pd.notna(r[f"{p2} (R$)"]) else 0.0
+                        iva = float(r['IVA (R$)']) if pd.notna(r['IVA (R$)']) else 0.0
                         
-                        if pd.notna(r['id']):
-                            if val > 0:
+                        if pd.notna(r.get('id')):
+                            if val > 0 or iva > 0:
                                 connection.execute(
-                                    text("UPDATE controle_divida SET valor = :val, destino = :dest WHERE id = :id AND usuario = :usuario"),
-                                    {"val": val, "dest": dest, "id": int(r['id']), "usuario": user}
+                                    text("UPDATE controle_divida SET gasto = :gasto, descricao = :desc, valor_total = :val, val_p1 = :vp1, val_p2 = :vp2, iva = :iva WHERE id = :id AND usuario = :usuario"),
+                                    {"gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva, "id": int(r['id']), "usuario": user}
                                 )
                             else:
                                 connection.execute(
@@ -103,13 +122,13 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                                     {"id": int(r['id']), "usuario": user}
                                 )
                         else:
-                            if val > 0:
+                            if val > 0 or iva > 0:
                                 connection.execute(
-                                    text("INSERT INTO controle_divida (usuario, ano, mes, valor, destino) VALUES (:usuario, :ano, :mes, :val, :dest)"),
-                                    {"usuario": user, "ano": int(ano_s), "mes": r['Mês'], "val": val, "dest": dest}
+                                    text("INSERT INTO controle_divida (usuario, ano, gasto, descricao, valor_total, val_p1, val_p2, iva) VALUES (:usuario, :ano, :gasto, :desc, :val, :vp1, :vp2, :iva)"),
+                                    {"usuario": user, "ano": int(ano_s), "gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva}
                                 )
             
-            st.success("Dívida salva com sucesso no Supabase!")
+            st.success("Dívida Fixa salva com sucesso no Supabase!")
             st.rerun()
         except Exception as e:
             st.error(f"Erro ao salvar dívida: {e}")
@@ -261,7 +280,7 @@ def render_extra_casa(user, conn_proj, c_proj, get_param):
                                 connection.execute(
                                     text("DELETE FROM extra_casa WHERE id = :id AND usuario = :usuario"),
                                     {"id": int(r['id']), "usuario": user}
-                                )
+                               পন্থী
                 st.success("Atualizado com sucesso!")
                 st.rerun()
             except Exception as e:
