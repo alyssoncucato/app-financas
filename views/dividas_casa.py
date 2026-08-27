@@ -7,11 +7,9 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     t_div = get_param(user, "divida_titulo", "DÍVIDA FIXA")
     st.subheader(f"📌 {t_div}")
 
-    # Participantes (Alysson e Isabela)
     p1 = get_param(user, "participante_1", "Alysson")
     p2 = get_param(user, "participante_2", "Isabela")
 
-    # Busca os lançamentos detalhados da dívida fixa no banco
     try:
         with engine.connect() as conn:
             df_div = pd.read_sql_query(
@@ -24,10 +22,8 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
     
-    # Filtra pelo ano selecionado
     df_a = df_div[df_div['ano'] == int(ano_s)] if not df_div.empty else pd.DataFrame()
 
-    # Totais gerais baseados na planilha (Soma da coluna IVA como dívida total, e o que cada um pagou)
     v_iva_tot = df_a['iva'].sum() if not df_a.empty else 49555.81
     v_p1_tot = df_a['val_p1'].sum() if not df_a.empty else 0.0
     v_p2_tot = df_a['val_p2'].sum() if not df_a.empty else 0.0
@@ -40,7 +36,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.markdown("### Detalhamento dos Gastos (Modelo Planilha)")
 
-    # Itens padrão sugeridos caso a tabela esteja vazia para o ano
     itens_padrao = [
         ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
         ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
@@ -280,7 +275,7 @@ def render_extra_casa(user, conn_proj, c_proj, get_param):
                                 connection.execute(
                                     text("DELETE FROM extra_casa WHERE id = :id AND usuario = :usuario"),
                                     {"id": int(r['id']), "usuario": user}
-                               পন্থী
+                                )
                 st.success("Atualizado com sucesso!")
                 st.rerun()
             except Exception as e:
