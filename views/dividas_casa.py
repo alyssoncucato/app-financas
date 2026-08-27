@@ -35,8 +35,11 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     c3.metric("🔵 Doação", f"R$ {v_doa:,.2f}")
     c4.metric("🟤 Falta", f"R$ {falta:,.2f}")
 
-    ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1)
-    df_a = df_div[df_div['ano'] == ano_s] if not df_div.empty else pd.DataFrame()
+    # Seletor de Ano (ao mudar, limpa a chave do editor para forçar o recarregamento correto)
+    ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
+    
+    # Filtra estritamente pelo ano selecionado
+    df_a = df_div[df_div['ano'] == int(ano_s)] if not df_div.empty else pd.DataFrame()
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
     t_div_tab = []
@@ -44,7 +47,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         r = df_a[df_a['mes'] == m] if not df_a.empty else pd.DataFrame()
         if not r.empty:
             dest_atual = str(r.iloc[0]['destino'] or "").strip()
-            # Garante que se estiver salvo algo diferente, mapeie corretamente ou deixe vazio
             if dest_atual.upper() not in ["PIX IVA", ""]:
                 dest_opcao = dest_atual
             else:
@@ -57,6 +59,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                 "Destino": dest_opcao
             })
         else:
+            # Se não houver registro para este mês neste ano, vem zerado e limpo!
             t_div_tab.append({
                 "id": None, 
                 "Mês": m, 
@@ -66,6 +69,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     df_tabela = pd.DataFrame(t_div_tab)[["id", "Mês", "Valor (R$)", "Destino"]]
 
+    # Chave dinâmica baseada no ano para o Streamlit recriar o editor limpo ao trocar de ano
     ed_div = st.data_editor(
         df_tabela, 
         column_config={
@@ -76,7 +80,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         }, 
         hide_index=True, 
         width="stretch",
-        key="editor_dividas"
+        key=f"editor_dividas_{ano_s}"
     )
 
     if st.button("💾 Salvar Dívida", type="primary"):
@@ -126,8 +130,8 @@ def render_casa(user, conn_proj, c_proj, get_param):
     except Exception:
         df_c = pd.DataFrame()
 
-    ano_c = st.selectbox("Ano Casa:", [2025, 2026, 2027], index=1)
-    df_ca = df_c[df_c['ano'] == ano_c] if not df_c.empty else pd.DataFrame()
+    ano_c = st.selectbox("Ano Casa:", [2025, 2026, 2027], index=1, key="select_ano_casa")
+    df_ca = df_c[df_c['ano'] == int(ano_c)] if not df_c.empty else pd.DataFrame()
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
     t_c_tab = []
@@ -147,7 +151,7 @@ def render_casa(user, conn_proj, c_proj, get_param):
         }, 
         hide_index=True, 
         width="stretch",
-        key="editor_casa"
+        key=f"editor_casa_{ano_c}"
     )
 
     if st.button("💾 Salvar Casa", type="primary"):
