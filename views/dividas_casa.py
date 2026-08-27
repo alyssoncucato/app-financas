@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+from database import engine
+from sqlalchemy import text
 
 def render_divida(user, conn_proj, c_proj, get_param, set_param):
     t_div = get_param(user, "divida_titulo", "DÍVIDA FIXA")
@@ -7,8 +9,17 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     v_tot = float(get_param(user, "valor_total", "50005.81"))
     v_doa = float(get_param(user, "doacao", "20000.00"))
     
-    df_div = pd.read_sql_query("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = ?", conn_proj, params=(user,))
-    
+    # Busca dados direto com a engine segura
+    try:
+        with engine.connect() as conn:
+            df_div = pd.read_sql_query(
+                text("SELECT id, ano, mes, valor, destino FROM controle_divida WHERE usuario = :usuario"),
+                conn,
+                params={"usuario": user}
+            )
+    except Exception:
+        df_div = pd.DataFrame()
+
     # REGRA: O valor pago só soma se o destino for exatamente "IVA" (ignorando maiúsculas/minúsculas)
     if not df_div.empty:
         df_div['destino_clean'] = df_div['destino'].astype(str).str.strip().str.upper()
@@ -46,7 +57,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                 "Destino": ""
             })
 
-    # Ordem correta das colunas: Mês -> Valor -> Destino
     df_tabela = pd.DataFrame(t_div_tab)[["id", "Mês", "Valor (R$)", "Destino"]]
 
     ed_div = st.data_editor(
@@ -63,21 +73,35 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     )
 
     if st.button("💾 Salvar Dívida", type="primary"):
-        for _, r in ed_div.iterrows():
-            val = float(r['Valor (R$)']) if pd.notna(r['Valor (R$)']) else 0.0
-            dest = str(r['Destino']) if pd.notna(r['Destino']) else ""
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    for _, r in ed_div.iterrows():
+                        val = float(r['Valor (R$)']) if pd.notna(r['Valor (R$)']) else 0.0
+                        dest = str(r['Destino']) if pd.notna(r['Destino']) else ""
+                        
+                        if pd.notna(r['id']):
+                            if val > 0:
+                                connection.execute(
+                                    text("UPDATE controle_divida SET valor = :val, destino = :dest WHERE id = :id AND usuario = :usuario"),
+                                    {"val": val, "dest": dest, "id": int(r['id']), "usuario": user}
+                                )
+                            else:
+                                connection.execute(
+                                    text("DELETE FROM controle_divida WHERE id = :id AND usuario = :usuario"),
+                                    {"id": int(r['id']), "usuario": user}
+                                )
+                        else:
+                            if val > 0:
+                                connection.execute(
+                                    text("INSERT INTO controle_divida (usuario, ano, mes, valor, destino) VALUES (:usuario, :ano, :mes, :val, :dest)"),
+                                    {"usuario": user, "ano": int(ano_s), "mes": r['Mês'], "val": val, "dest": dest}
+                                )
             
-            if pd.notna(r['id']):
-                if val > 0:
-                    c_proj.execute("UPDATE controle_divida SET valor = ?, destino = ? WHERE id = ? AND usuario = ?", (val, dest, int(r['id']), user))
-                else:
-                    c_proj.execute("DELETE FROM controle_divida WHERE id = ? AND usuario = ?", (int(r['id']), user))
-            else:
-                if val > 0:
-                    c_proj.execute("INSERT INTO controle_divida (usuario, ano, mes, valor, destino) VALUES (?, ?, ?, ?, ?)", (user, ano_s, r['Mês'], val, dest))
-        
-        st.success("Dívida salva com sucesso!")
-        st.rerun()
+            st.success("Dívida salva com sucesso no Supabase!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao salvar dívida: {e}")
 
 def render_casa(user, conn_proj, c_proj, get_param):
     t_casa = get_param(user, "casa_titulo", "CASA / FINANCIAMENTO")
@@ -85,14 +109,23 @@ def render_casa(user, conn_proj, c_proj, get_param):
     p2 = get_param(user, "participante_2", "Parceiro(a)")
     st.subheader(f"❤️ {t_casa}")
 
-    df_c = pd.read_sql_query("SELECT id, ano, mes, col1, col2, col3, col4, val_p1, val_p2 FROM casa_despesas WHERE usuario = ?", conn_proj, params=(user,))
+    try:
+        with engine.connect() as conn:
+            df_c = pd.read_sql_query(
+                text("SELECT id, ano, mes, col1, col2, col3, col4, val_p1, val_p2 FROM casa_despesas WHERE usuario = :usuario"),
+                conn,
+                params={"usuario": user}
+            )
+    except Exception:
+        df_c = pd.DataFrame()
+
     ano_c = st.selectbox("Ano Casa:", [2025, 2026, 2027], index=1)
-    df_ca = df_c[df_c['ano'] == ano_c]
+    df_ca = df_c[df_c['ano'] == ano_c] if not df_c.empty else pd.DataFrame()
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
     t_c_tab = []
     for m in meses:
-        r = df_ca[df_ca['mes'] == m]
+        r = df_ca[df_ca['mes'] == m] if not df_ca.empty else pd.DataFrame()
         if not r.empty:
             row = r.iloc[0]
             t_c_tab.append({"id": row['id'], "Mês": m, "Parcela": float(row['col1']), "Manutenção": float(row['col2']), "Energia": float(row['col3']), "Água": float(row['col4']), f"{p1} Pago": float(row['val_p1']), f"{p2} Pago": float(row['val_p2'])})
@@ -111,33 +144,55 @@ def render_casa(user, conn_proj, c_proj, get_param):
     )
 
     if st.button("💾 Salvar Casa", type="primary"):
-        for _, r in ed_c.iterrows():
-            p = float(r['Parcela'])
-            man = float(r['Manutenção'])
-            ene = float(r['Energia'])
-            agu = float(r['Água'])
-            tot = p + man + ene + agu
-            vp1 = float(r[f"{p1} Pago"])
-            vp2 = float(r[f"{p2} Pago"])
-            
-            if pd.notna(r['id']):
-                if tot > 0:
-                    c_proj.execute("UPDATE casa_despesas SET col1 = ?, col2 = ?, col3 = ?, col4 = ?, val_p1 = ?, val_p2 = ? WHERE id = ? AND usuario = ?", (p, man, ene, agu, vp1, vp2, int(r['id']), user))
-                else:
-                    c_proj.execute("DELETE FROM casa_despesas WHERE id = ? AND usuario = ?", (int(r['id']), user))
-            else:
-                if tot > 0:
-                    c_proj.execute("INSERT INTO casa_despesas (usuario, ano, mes, col1, col2, col3, col4, val_p1, val_p2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (user, ano_c, r['Mês'], p, man, ene, agu, vp1, vp2))
-        
-        st.success("Casa salva com sucesso!")
-        st.rerun()
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    for _, r in ed_c.iterrows():
+                        p = float(r['Parcela'])
+                        man = float(r['Manutenção'])
+                        ene = float(r['Energia'])
+                        agu = float(r['Água'])
+                        tot = p + man + ene + agu
+                        vp1 = float(r[f"{p1} Pago"])
+                        vp2 = float(r[f"{p2} Pago"])
+                        
+                        if pd.notna(r['id']):
+                            if tot > 0:
+                                connection.execute(
+                                    text("UPDATE casa_despesas SET col1 = :c1, col2 = :c2, col3 = :c3, col4 = :c4, val_p1 = :vp1, val_p2 = :vp2 WHERE id = :id AND usuario = :usuario"),
+                                    {"c1": p, "c2": man, "c3": ene, "c4": agu, "vp1": vp1, "vp2": vp2, "id": int(r['id']), "usuario": user}
+                                )
+                            else:
+                                connection.execute(
+                                    text("DELETE FROM casa_despesas WHERE id = :id AND usuario = :usuario"),
+                                    {"id": int(r['id']), "usuario": user}
+                                )
+                        else:
+                            if tot > 0:
+                                connection.execute(
+                                    text("INSERT INTO casa_despesas (usuario, ano, mes, col1, col2, col3, col4, val_p1, val_p2) VALUES (:usuario, :ano, :mes, :c1, :c2, :c3, :c4, :vp1, :vp2)"),
+                                    {"usuario": user, "ano": int(ano_c), "mes": r['Mês'], "c1": p, "c2": man, "c3": ene, "c4": agu, "vp1": vp1, "vp2": vp2}
+                                )
+            st.success("Casa salva com sucesso!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao salvar casa: {e}")
 
 def render_extra_casa(user, conn_proj, c_proj, get_param):
     st.subheader("🏠 Extra Casa")
     p1 = get_param(user, "participante_1", "Você")
     p2 = get_param(user, "participante_2", "Parceiro(a)")
 
-    df_q = pd.read_sql_query("SELECT id, item, val_p1, val_p2 FROM extra_casa WHERE usuario = ?", conn_proj, params=(user,))
+    try:
+        with engine.connect() as conn:
+            df_q = pd.read_sql_query(
+                text("SELECT id, item, val_p1, val_p2 FROM extra_casa WHERE usuario = :usuario"),
+                conn,
+                params={"usuario": user}
+            )
+    except Exception:
+        df_q = pd.DataFrame()
+
     tot_p1 = df_q['val_p1'].sum() if not df_q.empty else 0.0
     tot_p2 = df_q['val_p2'].sum() if not df_q.empty else 0.0
 
@@ -149,11 +204,19 @@ def render_extra_casa(user, conn_proj, c_proj, get_param):
 
     with st.form("f_extra_casa"):
         it = st.text_input("Item (Ex: Pedrinhas, Grama):")
-        va = no = st.number_input(f"{p1} Pagou (R$):", value=0.0)
+        va = st.number_input(f"{p1} Pagou (R$):", value=0.0)
         vi = st.number_input(f"{p2} Pagou (R$):", value=0.0)
         if st.form_submit_button("Adicionar Item") and it:
-            c_proj.execute("INSERT INTO extra_casa (usuario, item, val_p1, val_p2) VALUES (?, ?, ?, ?)", (user, it, va, vi))
-            st.rerun()
+            try:
+                with engine.connect() as connection:
+                    with connection.begin():
+                        connection.execute(
+                            text("INSERT INTO extra_casa (usuario, item, val_p1, val_p2) VALUES (:usuario, :item, :vp1, :vp2)"),
+                            {"usuario": user, "item": it, "vp1": va, "vp2": vi}
+                        )
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao adicionar item: {e}")
 
     if not df_q.empty:
         ed_q = st.data_editor(
@@ -170,15 +233,25 @@ def render_extra_casa(user, conn_proj, c_proj, get_param):
         )
         
         if st.button("💾 Salvar Alterações Extra Casa", type="primary"):
-            for _, r in ed_q.iterrows():
-                item_nome = str(r['item']) if pd.notna(r['item']) else ""
-                vp1 = float(r['val_p1']) if pd.notna(r['val_p1']) else 0.0
-                vp2 = float(r['val_p2']) if pd.notna(r['val_p2']) else 0.0
-                
-                if item_nome.strip():
-                    c_proj.execute("UPDATE extra_casa SET item = ?, val_p1 = ?, val_p2 = ? WHERE id = ? AND usuario = ?", (item_nome, vp1, vp2, int(r['id']), user))
-                else:
-                    c_proj.execute("DELETE FROM extra_casa WHERE id = ? AND usuario = ?", (int(r['id']), user))
-            
-            st.success("Atualizado com sucesso!")
-            st.rerun()
+            try:
+                with engine.connect() as connection:
+                    with connection.begin():
+                        for _, r in ed_q.iterrows():
+                            item_nome = str(r['item']) if pd.notna(r['item']) else ""
+                            vp1 = float(r['val_p1']) if pd.notna(r['val_p1']) else 0.0
+                            vp2 = float(r['val_p2']) if pd.notna(r['val_p2']) else 0.0
+                            
+                            if item_nome.strip():
+                                connection.execute(
+                                    text("UPDATE extra_casa SET item = :item, val_p1 = :vp1, val_p2 = :vp2 WHERE id = :id AND usuario = :usuario"),
+                                    {"item": item_nome, "vp1": vp1, "vp2": vp2, "id": int(r['id']), "usuario": user}
+                                )
+                            else:
+                                connection.execute(
+                                    text("DELETE FROM extra_casa WHERE id = :id AND usuario = :usuario"),
+                                    {"id": int(r['id']), "usuario": user}
+                                )
+                st.success("Atualizado com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar extra casa: {e}")
