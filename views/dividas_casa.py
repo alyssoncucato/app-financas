@@ -23,8 +23,10 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     except Exception:
         df_div = pd.DataFrame()
 
+    df_a = df_div[df_div['ano'] == int(ano_s)] if not df_div.empty else pd.DataFrame()
+
     # O total da dívida fixa é a soma da coluna IVA dos itens detalhados
-    v_tot = df_div['iva'].sum() if not df_div.empty else 49555.81
+    v_tot = df_a['iva'].sum() if not df_a.empty else 49555.81
 
     # --- 2. BUSCA DADOS DOS PAGAMENTOS MENSAIS PARA A IVA ---
     try:
