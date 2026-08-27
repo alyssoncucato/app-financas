@@ -13,27 +13,32 @@ def render(user, conn_fin, c_fin, todas_categorias):
         df_cc = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? AND origem = 'EXTRATO_CONTA' ORDER BY data DESC", conn_fin, params=(user,))
         
         if not df_cc.empty:
-            df_cc["Excluir"] = False
-            
             df_ed_cc = st.data_editor(
                 df_cc, 
                 column_config={
                     "id": None, 
                     "origem": None, 
                     "status_fatura": None, 
-                    "Excluir": st.column_config.CheckboxColumn("❌ Excluir?", help="Marque para apagar este lançamento"),
                     "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
                 }, 
                 hide_index=True, 
                 width="stretch", 
+                num_rows="dynamic",
                 key="editor_cc"
             )
             
             if st.button("💾 Salvar Edições (Conta Corrente)", type="primary", key="btn_cc"):
+                ids_atuais = set(df_cc['id'].dropna().astype(int).tolist())
+                ids_editados = set(df_ed_cc['id'].dropna().astype(int).tolist()) if not df_ed_cc.empty else set()
+                ids_para_deletar = ids_atuais - ids_editados
+
+                # Deleta do banco os IDs que sumiram da tabela
+                for del_id in ids_para_deletar:
+                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
+
+                # Atualiza o restante
                 for _, r in df_ed_cc.iterrows():
-                    if r["Excluir"]:
-                        c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(r['id']), user))
-                    else:
+                    if pd.notna(r.get('id')):
                         c_fin.execute(
                             "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ? WHERE id = ? AND usuario = ?", 
                             (r['data'], r['descricao'], r['valor'], r['categoria'], int(r['id']), user)
@@ -55,26 +60,29 @@ def render(user, conn_fin, c_fin, todas_categorias):
         df_cartao = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? AND origem = 'FATURA_CARTAO' ORDER BY data DESC", conn_fin, params=(user,))
         
         if not df_cartao.empty:
-            df_cartao["Excluir"] = False
-            
             df_ed_cartao = st.data_editor(
                 df_cartao, 
                 column_config={
                     "id": None, 
                     "origem": None, 
-                    "Excluir": st.column_config.CheckboxColumn("❌ Excluir?", help="Marque para apagar este lançamento"),
                     "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
                 }, 
                 hide_index=True, 
                 width="stretch", 
+                num_rows="dynamic",
                 key="editor_cartao"
             )
             
             if st.button("💾 Salvar Edições (Cartão)", type="primary", key="btn_cartao"):
+                ids_atuais = set(df_cartao['id'].dropna().astype(int).tolist())
+                ids_editados = set(df_ed_cartao['id'].dropna().astype(int).tolist()) if not df_ed_cartao.empty else set()
+                ids_para_deletar = ids_atuais - ids_editados
+
+                for del_id in ids_para_deletar:
+                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
+
                 for _, r in df_ed_cartao.iterrows():
-                    if r["Excluir"]:
-                        c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(r['id']), user))
-                    else:
+                    if pd.notna(r.get('id')):
                         c_fin.execute(
                             "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ?, status_fatura = ? WHERE id = ? AND usuario = ?", 
                             (r['data'], r['descricao'], r['valor'], r['categoria'], r['status_fatura'], int(r['id']), user)
@@ -96,25 +104,28 @@ def render(user, conn_fin, c_fin, todas_categorias):
         df_all = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? ORDER BY data DESC", conn_fin, params=(user,))
         
         if not df_all.empty:
-            df_all["Excluir"] = False
-            
             df_ed = st.data_editor(
                 df_all, 
                 column_config={
                     "id": None, 
-                    "Excluir": st.column_config.CheckboxColumn("❌ Excluir?", help="Marque para apagar este lançamento"),
                     "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
                 }, 
                 hide_index=True, 
                 width="stretch", 
+                num_rows="dynamic",
                 key="editor_todos"
             )
             
             if st.button("💾 Salvar Edições (Todos)", type="primary", key="btn_todos"):
+                ids_atuais = set(df_all['id'].dropna().astype(int).tolist())
+                ids_editados = set(df_ed['id'].dropna().astype(int).tolist()) if not df_ed.empty else set()
+                ids_para_deletar = ids_atuais - ids_editados
+
+                for del_id in ids_para_deletar:
+                    c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(del_id), user))
+
                 for _, r in df_ed.iterrows():
-                    if r["Excluir"]:
-                        c_fin.execute("DELETE FROM transacoes WHERE id = ? AND usuario = ?", (int(r['id']), user))
-                    else:
+                    if pd.notna(r.get('id')):
                         c_fin.execute(
                             "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ?, status_fatura = ? WHERE id = ? AND usuario = ?", 
                             (r['data'], r['descricao'], r['valor'], r['categoria'], r['status_fatura'], int(r['id']), user)
