@@ -2,10 +2,8 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-# --- LEITURA DOS SECRETS DO STREAMLIT CLOUD ---
 DB_URL = st.secrets["DB_URL"]
 
-# Engine de conexão otimizada
 engine = create_engine(
     DB_URL, 
     connect_args={
@@ -14,13 +12,11 @@ engine = create_engine(
 )
 
 class Psycopg2CursorProxy:
-    """Proxy universal para o cursor que substitui qualquer '?' por '%s'"""
     def __init__(self, real_cursor):
         self._cursor = real_cursor
 
     def execute(self, query, vars=None):
         if isinstance(query, str):
-            # Substituição universal de ? por %s para aceitar sintaxe SQLite no PostgreSQL
             query = query.replace("?", "%s")
         return self._cursor.execute(query, vars)
 
@@ -33,7 +29,6 @@ class Psycopg2CursorProxy:
         return getattr(self._cursor, name)
 
 class EngineCompatWrapper:
-    """Wrapper para a engine para suportar métodos legados e interceptar o cursor do Pandas"""
     def __init__(self, eng):
         self._engine = eng
 
@@ -47,17 +42,14 @@ class EngineCompatWrapper:
         pass
 
     def cursor(self):
-        """Retorna o cursor proxy blindado para o Pandas e queries diretas"""
         raw_conn = self._engine.raw_connection()
         real_cur = raw_conn.cursor()
         return Psycopg2CursorProxy(real_cur)
 
-# Aliases compatíveis com o código original
 conn_fin = EngineCompatWrapper(engine)
 conn_proj = EngineCompatWrapper(engine)
 
 class CursorAdapter:
-    """Adaptador para manter a compatibilidade com a sintaxe de cursor própria"""
     def execute(self, query, params=None):
         try:
             with engine.connect() as conn:
@@ -103,7 +95,7 @@ def inicializar_bancos():
                     )
                 '''))
                 
-                # Tabela de Transações
+                # Tabela de Transações isoladas por usuário
                 conn.execute(text('''
                     CREATE TABLE IF NOT EXISTS transacoes (
                         id SERIAL PRIMARY KEY,
@@ -117,7 +109,7 @@ def inicializar_bancos():
                     )
                 '''))
 
-                # Tabela de Regras
+                # Regras por usuário
                 conn.execute(text('''
                     CREATE TABLE IF NOT EXISTS regras_categorias (
                         id SERIAL PRIMARY KEY,
@@ -128,19 +120,7 @@ def inicializar_bancos():
                     )
                 '''))
 
-                # Tabela de Dívida
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS controle_divida (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        ano INTEGER,
-                        mes TEXT,
-                        valor DOUBLE PRECISION,
-                        destino TEXT
-                    )
-                '''))
-
-                # Parâmetros Gerais
+                # Parâmetros gerais por usuário
                 conn.execute(text('''
                     CREATE TABLE IF NOT EXISTS parametros_gerais (
                         id SERIAL PRIMARY KEY,
@@ -151,34 +131,7 @@ def inicializar_bancos():
                     )
                 '''))
 
-                # Casa Despesas
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS casa_despesas (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        ano INTEGER,
-                        mes TEXT,
-                        col1 DOUBLE PRECISION,
-                        col2 DOUBLE PRECISION,
-                        col3 DOUBLE PRECISION,
-                        col4 DOUBLE PRECISION,
-                        val_p1 DOUBLE PRECISION,
-                        val_p2 DOUBLE PRECISION
-                    )
-                '''))
-
-                # Extra Casa
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS extra_casa (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        item TEXT,
-                        val_p1 DOUBLE PRECISION,
-                        val_p2 DOUBLE PRECISION
-                    )
-                '''))
-
-                # Projetos
+                # Projetos isolados por usuário
                 conn.execute(text('''
                     CREATE TABLE IF NOT EXISTS projetos_lista (
                         id SERIAL PRIMARY KEY,
@@ -194,14 +147,30 @@ def inicializar_bancos():
                         projeto_id INTEGER REFERENCES projetos_lista(id) ON DELETE CASCADE,
                         item TEXT,
                         valor DOUBLE PRECISION,
-                        situacao TEXT
+                        status TEXT
                     )
                 '''))
 
-                # Cria usuário inicial se não existir
-                res = conn.execute(text("SELECT id FROM usuarios WHERE username = 'alysson'")).fetchone()
-                if not res:
-                    conn.execute(text("INSERT INTO usuarios (username, senha, email) VALUES ('alysson', '1234', 'alysson@email.com')"))
+                # Abas Dinâmicas criadas por IA por usuário
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS usuario_abas_ia (
+                        id SERIAL PRIMARY KEY,
+                        usuario TEXT,
+                        nome_aba TEXT,
+                        icone TEXT,
+                        config_colunas TEXT
+                    )
+                '''))
+
+                # Dados genéricos para as abas criadas por IA
+                conn.execute(text('''
+                    CREATE TABLE IF NOT EXISTS dados_abas_ia (
+                        id SERIAL PRIMARY KEY,
+                        aba_id INTEGER REFERENCES usuario_abas_ia(id) ON DELETE CASCADE,
+                        usuario TEXT,
+                        dados_json TEXT
+                    )
+                '''))
     except Exception as e:
         print(f"Aviso de inicializacao: {e}")
 
