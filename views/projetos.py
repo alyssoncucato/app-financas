@@ -59,34 +59,51 @@ def render(user, conn_proj, c_proj):
     novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
     st.session_state[f"custo_prev_{proj_id}"] = novo_custo_previsto
 
-    # --- 3. ITENS / GASTOS DO PROJETO ---
+    # --- 3. CARREGA ITENS E DETECTA AS COLUNAS REAIS DA TABELA NO BANCO ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
-                text("SELECT id, projeto_id, descricao, valor, status FROM projetos_itens WHERE projeto_id = :proj_id"),
+                text("SELECT * FROM projetos_itens WHERE projeto_id = :proj_id"),
                 conn,
                 params={"proj_id": int(proj_id)}
             )
     except Exception:
-        # Se por acaso a tabela usar outra coluna, tentamos fallback ou criamos vazio
-        try:
-            with engine.connect() as conn:
-                df_itens = pd.read_sql_query(
-                    text("SELECT * FROM projetos_itens WHERE projeto_id = :proj_id"),
-                    conn,
-                    params={"proj_id": int(proj_id)}
-                )
-        except Exception:
-            df_itens = pd.DataFrame()
+        df_itens = pd.DataFrame()
 
-    if df_itens.empty:
-        df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
-    else:
-        if 'status' in df_itens.columns:
-            df_itens['status'] = df_itens['status'].apply(lambda x: "Pago" if str(x).strip().capitalize() == "Pago" else "Não Pago")
-        else:
-            df_itens['status'] = "Não Pago"
-        df_edit_base = df_itens
+    # Identifica dinamicamente qual coluna guarda o texto do item no Supabase
+    col_desc_real = 'descricao'
+    for c in ['descricao', 'item', 'nome', 'titulo', 'peca']:
+        if c in df_itens.columns:
+            col_desc_real = c
+            break
+
+    # Identifica dinamicamente a coluna de valor
+    col_val_real = 'valor'
+    for c in ['valor', 'preco', 'custo']:
+        if c in df_itens.columns:
+            col_val_real = c
+            break
+
+    # Identifica dinamicamente a coluna de status
+    col_status_real = 'status'
+    for c in ['status', 'situacao', 'estado']:
+        if c in df_itens.columns:
+            col_status_real = c
+            break
+
+    # Prepara o DataFrame para exibição na tela com nomes padronizados
+    t_data = []
+    if not df_itens.empty:
+        for _, r in df_itens.iterrows():
+            t_data.append({
+                "id": r.get('id'),
+                "projeto_id": r.get('projeto_id'),
+                "descricao": r.get(col_desc_real, ""),
+                "valor": float(r.get(col_val_real, 0.0) or 0.0),
+                "status": "Pago" if str(r.get(col_status_real, "")).strip().capitalize() == "Pago" else "Não Pago"
+            })
+    
+    df_edit_base = pd.DataFrame(t_data) if t_data else pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
 
     st.markdown("#### Lançamentos e Peças do Projeto")
     ed_itens = st.data_editor(
@@ -146,16 +163,12 @@ def render(user, conn_proj, c_proj):
                         st_val = str(r['status']) if pd.notna(r.get('status')) else "Não Pago"
                         
                         if pd.notna(r.get('id')):
-                            connection.execute(
-                                text("UPDATE projetos_itens SET descricao = :desc, valor = :val, status = :status WHERE id = :id"),
-                                {"desc": desc, "val": val, "status": st_val, "id": int(r['id'])}
-                            )
+                            query_upd = f"UPDATE projetos_itens SET {col_desc_real} = :desc, {col_val_real} = :val, {col_status_real} = :status WHERE id = :id"
+                            connection.execute(text(query_upd), {"desc": desc, "val": val, "status": st_val, "id": int(r['id'])})
                         else:
                             if desc.strip() or val > 0:
-                                connection.execute(
-                                    text("INSERT INTO projetos_itens (projeto_id, descricao, valor, status) VALUES (:proj_id, :desc, :val, :status)"),
-                                    {"proj_id": int(proj_id), "desc": desc, "val": val, "status": st_val}
-                                )
+                                query_ins = f"INSERT INTO projetos_itens (projeto_id, {col_desc_real}, {col_val_real}, {col_status_real}) VALUES (:proj_id, :desc, :val, :status)"
+                                connection.execute(text(query_ins), {"proj_id": int(proj_id), "desc": desc, "val": val, "status": st_val})
             st.success("Projeto salvo com sucesso!")
             st.rerun()
         except Exception as e:
