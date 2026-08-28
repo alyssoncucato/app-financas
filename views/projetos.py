@@ -53,13 +53,14 @@ def render(user, conn_proj, c_proj):
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
+    # Campo interativo para definir o Custo Previsto (O que você ESPERA gastar no projeto)
     if f"custo_prev_{proj_id}" not in st.session_state:
         st.session_state[f"custo_prev_{proj_id}"] = 0.0
 
-    novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
-    st.session_state[f"custo_prev_{proj_id}"] = novo_custo_previsto
+    custo_esperado = st.number_input("Custo Previsto (Valor que você ESPERA gastar no projeto R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
+    st.session_state[f"custo_prev_{proj_id}"] = custo_esperado
 
-    # --- 3. CARREGA ITENS E DETECTA AS COLUNAS REAIS DA TABELA NO BANCO ---
+    # --- 3. CARREGA ITENS E DETECTA AS COLUNAS REAIS DA TABELA ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
@@ -70,28 +71,24 @@ def render(user, conn_proj, c_proj):
     except Exception:
         df_itens = pd.DataFrame()
 
-    # Identifica dinamicamente qual coluna guarda o texto do item no Supabase
     col_desc_real = 'descricao'
     for c in ['descricao', 'item', 'nome', 'titulo', 'peca']:
         if c in df_itens.columns:
             col_desc_real = c
             break
 
-    # Identifica dinamicamente a coluna de valor
     col_val_real = 'valor'
     for c in ['valor', 'preco', 'custo']:
         if c in df_itens.columns:
             col_val_real = c
             break
 
-    # Identifica dinamicamente a coluna de status
     col_status_real = 'status'
     for c in ['status', 'situacao', 'estado']:
         if c in df_itens.columns:
             col_status_real = c
             break
 
-    # Prepara o DataFrame para exibição na tela com nomes padronizados
     t_data = []
     if not df_itens.empty:
         for _, r in df_itens.iterrows():
@@ -121,23 +118,28 @@ def render(user, conn_proj, c_proj):
         key=f"editor_projeto_{proj_id}"
     )
 
-    # --- 4. CÁLCULOS E MÉTRICAS ---
+    # --- 4. CÁLCULOS E MÉTRICAS CORRIGIDOS ---
     val_gasto = 0.0
-    custo_total_itens = 0.0
-    if not ed_itens.empty and 'valor' in ed_itens.columns:
-        custo_total_itens = ed_itens['valor'].sum()
-        if 'status' in ed_itens.columns:
-            val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
-        else:
-            val_gasto = custo_total_itens
+    val_a_gastar = 0.0
+    custo_total_lançado = 0.0
 
-    val_a_gastar = novo_custo_previsto - val_gasto
+    if not ed_itens.empty and 'valor' in ed_itens.columns:
+        custo_total_lançado = ed_itens['valor'].sum() # Soma de NÄO PAGO + PAGO lançados na planilha
+        
+        if 'status' in ed_itens.columns:
+            # Valor Gasto = Soma apenas do que está marcado como PAGO
+            val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
+            
+            # Valor a Gastar = Soma apenas do que está marcado como NÄO PAGO
+            val_a_gastar = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Não Pago']['valor'].sum()
+        else:
+            val_gasto = custo_total_lançado
 
     st.markdown("")
     m1, m2, m3 = st.columns(3)
-    m1.metric("🎯 Custo Previsto", f"R$ {novo_custo_previsto:,.2f}")
+    m1.metric("🎯 Custo Previsto (Esperado)", f"R$ {custo_esperado:,.2f}")
     m2.metric("🟢 Valor Gasto (Pago)", f"R$ {val_gasto:,.2f}")
-    m3.metric("⏳ Valor a Gastar (Saldo)", f"R$ {val_a_gastar:,.2f}", delta=f"Total Itens: R$ {custo_total_itens:,.2f}")
+    m3.metric("⏳ Valor a Gastar (Não Pago)", f"R$ {val_a_gastar:,.2f}", delta=f"Total Lançado (Pago + Não Pago): R$ {custo_total_lançado:,.2f}")
     st.markdown("")
 
     if st.button("💾 Salvar Alterações do Projeto", type="primary"):
