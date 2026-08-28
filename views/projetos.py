@@ -53,14 +53,13 @@ def render(user, conn_proj, c_proj):
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
-    # Campo interativo para definir o Custo Previsto (O que você ESPERA gastar no projeto)
     if f"custo_prev_{proj_id}" not in st.session_state:
         st.session_state[f"custo_prev_{proj_id}"] = 0.0
 
     custo_esperado = st.number_input("Custo Previsto (Valor que você ESPERA gastar no projeto R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
     st.session_state[f"custo_prev_{proj_id}"] = custo_esperado
 
-    # --- 3. CARREGA ITENS E DETECTA AS COLUNAS REAIS DA TABELA ---
+    # --- 3. CARREGA ITENS ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
@@ -92,12 +91,14 @@ def render(user, conn_proj, c_proj):
     t_data = []
     if not df_itens.empty:
         for _, r in df_itens.iterrows():
+            st_raw = str(r.get(col_status_real, "")).strip().upper()
+            st_formatado = "Pago" if st_raw in ["PAGO", "SIM", "1"] else "Não Pago"
             t_data.append({
                 "id": r.get('id'),
                 "projeto_id": r.get('projeto_id'),
                 "descricao": r.get(col_desc_real, ""),
                 "valor": float(r.get(col_val_real, 0.0) or 0.0),
-                "status": "Pago" if str(r.get(col_status_real, "")).strip().capitalize() == "Pago" else "Não Pago"
+                "status": st_formatado
             })
     
     df_edit_base = pd.DataFrame(t_data) if t_data else pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
@@ -118,20 +119,20 @@ def render(user, conn_proj, c_proj):
         key=f"editor_projeto_{proj_id}"
     )
 
-    # --- 4. CÁLCULOS E MÉTRICAS CORRIGIDOS ---
+    # --- 4. CÁLCULOS E MÉTRICAS BLINDADOS ---
     val_gasto = 0.0
     val_a_gastar = 0.0
     custo_total_lançado = 0.0
 
     if not ed_itens.empty and 'valor' in ed_itens.columns:
-        custo_total_lançado = ed_itens['valor'].sum() # Soma de NÄO PAGO + PAGO lançados na planilha
+        custo_total_lançado = ed_itens['valor'].sum()
         
         if 'status' in ed_itens.columns:
-            # Valor Gasto = Soma apenas do que está marcado como PAGO
-            val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
+            # Limpa e converte para maiúsculo para garantir a soma exata sem falhas de acento/espaço
+            status_limpo = ed_itens['status'].astype(str).str.strip().str.upper()
             
-            # Valor a Gastar = Soma apenas do que está marcado como NÄO PAGO
-            val_a_gastar = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Não Pago']['valor'].sum()
+            val_gasto = ed_itens[status_limpo.isin(['PAGO'])]['valor'].sum()
+            val_a_gastar = ed_itens[status_limpo.isin(['NÃO PAGO', 'NAO PAGO'])]['valor'].sum()
         else:
             val_gasto = custo_total_lançado
 
