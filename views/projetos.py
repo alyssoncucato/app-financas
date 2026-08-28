@@ -6,7 +6,7 @@ from sqlalchemy import text
 def render(user, conn_proj, c_proj):
     st.subheader("🚗 Projetos e Reformas")
 
-    # --- 1. CRIAÇÃO DE NOVO PROJETO (Isolado por usuário) ---
+    # --- 1. CRIAÇÃO DE NOVO PROJETO ---
     col1, col2 = st.columns([2, 1])
     with col1:
         novo_proj_nome = st.text_input("Novo Projeto:", placeholder="Ex: GOLZERA BOLADO, MOTO...")
@@ -29,7 +29,7 @@ def render(user, conn_proj, c_proj):
 
     st.divider()
 
-    # --- 2. SELEÇÃO DE PROJETOS DO USUÁRIO ATUAL ---
+    # --- 2. SELEÇÃO DE PROJETOS ---
     try:
         with engine.connect() as conn:
             df_projetos = pd.read_sql_query(
@@ -53,14 +53,13 @@ def render(user, conn_proj, c_proj):
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
-    # Campo interativo para definir o Custo Previsto do Projeto
     if f"custo_prev_{proj_id}" not in st.session_state:
         st.session_state[f"custo_prev_{proj_id}"] = 0.0
 
     novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
     st.session_state[f"custo_prev_{proj_id}"] = novo_custo_previsto
 
-    # --- 3. ITENS / GASTOS DO PROJETO SELECIONADO ---
+    # --- 3. ITENS / GASTOS DO PROJETO ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
@@ -69,12 +68,24 @@ def render(user, conn_proj, c_proj):
                 params={"proj_id": int(proj_id)}
             )
     except Exception:
-        df_itens = pd.DataFrame()
+        # Se por acaso a tabela usar outra coluna, tentamos fallback ou criamos vazio
+        try:
+            with engine.connect() as conn:
+                df_itens = pd.read_sql_query(
+                    text("SELECT * FROM projetos_itens WHERE projeto_id = :proj_id"),
+                    conn,
+                    params={"proj_id": int(proj_id)}
+                )
+        except Exception:
+            df_itens = pd.DataFrame()
 
     if df_itens.empty:
         df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
     else:
-        df_itens['status'] = df_itens['status'].apply(lambda x: "Pago" if str(x).strip().capitalize() == "Pago" else "Não Pago")
+        if 'status' in df_itens.columns:
+            df_itens['status'] = df_itens['status'].apply(lambda x: "Pago" if str(x).strip().capitalize() == "Pago" else "Não Pago")
+        else:
+            df_itens['status'] = "Não Pago"
         df_edit_base = df_itens
 
     st.markdown("#### Lançamentos e Peças do Projeto")
@@ -94,12 +105,14 @@ def render(user, conn_proj, c_proj):
     )
 
     # --- 4. CÁLCULOS E MÉTRICAS ---
-    if not ed_itens.empty and 'valor' in ed_itens.columns and 'status' in ed_itens.columns:
-        val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
+    val_gasto = 0.0
+    custo_total_itens = 0.0
+    if not ed_itens.empty and 'valor' in ed_itens.columns:
         custo_total_itens = ed_itens['valor'].sum()
-    else:
-        val_gasto = 0.0
-        custo_total_itens = 0.0
+        if 'status' in ed_itens.columns:
+            val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
+        else:
+            val_gasto = custo_total_itens
 
     val_a_gastar = novo_custo_previsto - val_gasto
 
@@ -128,9 +141,9 @@ def render(user, conn_proj, c_proj):
                         )
 
                     for _, r in ed_itens.iterrows():
-                        desc = str(r['descricao']) if pd.notna(r['descricao']) else ""
-                        val = float(r['valor']) if pd.notna(r['valor']) else 0.0
-                        st_val = str(r['status']) if pd.notna(r['status']) else "Não Pago"
+                        desc = str(r['descricao']) if pd.notna(r.get('descricao')) else ""
+                        val = float(r['valor']) if pd.notna(r.get('valor')) else 0.0
+                        st_val = str(r['status']) if pd.notna(r.get('status')) else "Não Pago"
                         
                         if pd.notna(r.get('id')):
                             connection.execute(
