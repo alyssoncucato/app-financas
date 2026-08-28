@@ -6,7 +6,7 @@ from sqlalchemy import text
 def render(user, conn_proj, c_proj):
     st.subheader("🚗 Projetos e Reformas")
 
-    # --- 1. CRIAÇÃO DE NOVO PROJETO ---
+    # --- 1. CRIAÇÃO DE NOVO PROJETO (Isolado por usuário) ---
     col1, col2 = st.columns([2, 1])
     with col1:
         novo_proj_nome = st.text_input("Novo Projeto:", placeholder="Ex: GOLZERA BOLADO, MOTO...")
@@ -29,7 +29,7 @@ def render(user, conn_proj, c_proj):
 
     st.divider()
 
-    # --- 2. SELEÇÃO DE PROJETOS EXISTENTES ---
+    # --- 2. SELEÇÃO DE PROJETOS DO USUÁRIO ATUAL ---
     try:
         with engine.connect() as conn:
             df_projetos = pd.read_sql_query(
@@ -53,7 +53,7 @@ def render(user, conn_proj, c_proj):
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
-    # Campo interativo para definir o Custo Previsto do Projeto (armazenado na sessão do navegador)
+    # Campo interativo para definir o Custo Previsto do Projeto
     if f"custo_prev_{proj_id}" not in st.session_state:
         st.session_state[f"custo_prev_{proj_id}"] = 0.0
 
@@ -64,9 +64,9 @@ def render(user, conn_proj, c_proj):
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
-                text("SELECT id, projeto_id, descricao, valor, status FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id"),
+                text("SELECT id, projeto_id, descricao, valor, status FROM projetos_itens WHERE projeto_id = :proj_id"),
                 conn,
-                params={"usuario": user, "proj_id": int(proj_id)}
+                params={"proj_id": int(proj_id)}
             )
     except Exception:
         df_itens = pd.DataFrame()
@@ -118,13 +118,13 @@ def render(user, conn_proj, c_proj):
                     
                     if ids_atuais:
                         connection.execute(
-                            text("DELETE FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id AND id NOT IN :ids"),
-                            {"usuario": user, "proj_id": int(proj_id), "ids": tuple(ids_atuais)}
+                            text("DELETE FROM projetos_itens WHERE projeto_id = :proj_id AND id NOT IN :ids"),
+                            {"proj_id": int(proj_id), "ids": tuple(ids_atuais)}
                         )
                     else:
                         connection.execute(
-                            text("DELETE FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id"),
-                            {"usuario": user, "proj_id": int(proj_id)}
+                            text("DELETE FROM projetos_itens WHERE projeto_id = :proj_id"),
+                            {"proj_id": int(proj_id)}
                         )
 
                     for _, r in ed_itens.iterrows():
@@ -134,14 +134,14 @@ def render(user, conn_proj, c_proj):
                         
                         if pd.notna(r.get('id')):
                             connection.execute(
-                                text("UPDATE projetos_itens SET descricao = :desc, valor = :val, status = :status WHERE id = :id AND usuario = :usuario"),
-                                {"desc": desc, "val": val, "status": st_val, "id": int(r['id']), "usuario": user}
+                                text("UPDATE projetos_itens SET descricao = :desc, valor = :val, status = :status WHERE id = :id"),
+                                {"desc": desc, "val": val, "status": st_val, "id": int(r['id'])}
                             )
                         else:
                             if desc.strip() or val > 0:
                                 connection.execute(
-                                    text("INSERT INTO projetos_itens (usuario, projeto_id, descricao, valor, status) VALUES (:usuario, :proj_id, :desc, :val, :status)"),
-                                    {"usuario": user, "proj_id": int(proj_id), "desc": desc, "val": val, "status": st_val}
+                                    text("INSERT INTO projetos_itens (projeto_id, descricao, valor, status) VALUES (:proj_id, :desc, :val, :status)"),
+                                    {"proj_id": int(proj_id), "desc": desc, "val": val, "status": st_val}
                                 )
             st.success("Projeto salvo com sucesso!")
             st.rerun()
