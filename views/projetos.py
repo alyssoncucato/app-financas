@@ -53,13 +53,7 @@ def render(user, conn_proj, c_proj):
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
-    if f"custo_prev_{proj_id}" not in st.session_state:
-        st.session_state[f"custo_prev_{proj_id}"] = 0.0
-
-    custo_esperado = st.number_input("Custo Previsto (Valor que você ESPERA gastar no projeto R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
-    st.session_state[f"custo_prev_{proj_id}"] = custo_esperado
-
-    # --- 3. CARREGA ITENS ---
+    # --- 3. CARREGA ITENS E DETECTA COLUNAS DO BANCO ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
@@ -88,9 +82,30 @@ def render(user, conn_proj, c_proj):
             col_status_real = c
             break
 
-    t_data = []
+    # Recupera o Custo Previsto salvo no banco (armazenado com marcador especial)
+    custo_previsto_salvo = 0.0
     if not df_itens.empty:
-        for _, r in df_itens.iterrows():
+        df_prev = df_itens[df_itens[col_desc_real].astype(str).str.strip() == '_CUSTO_PREVISTO_']
+        if not df_prev.empty:
+            custo_previsto_salvo = float(df_prev.iloc[0][col_val_real] or 0.0)
+
+    # Input interativo do Custo Previsto
+    custo_esperado = st.number_input(
+        "Custo Previsto (Valor que você ESPERA gastar no projeto R$):", 
+        value=custo_previsto_salvo, 
+        format="%.2f", 
+        key=f"input_custo_{proj_id}"
+    )
+
+    # Filtra os itens normais da tabela (removendo a linha de controle do custo previsto)
+    if not df_itens.empty:
+        df_itens_normais = df_itens[df_itens[col_desc_real].astype(str).str.strip() != '_CUSTO_PREVISTO_']
+    else:
+        df_itens_normais = pd.DataFrame()
+
+    t_data = []
+    if not df_itens_normais.empty:
+        for _, r in df_itens_normais.iterrows():
             st_raw = str(r.get(col_status_real, "")).strip().upper()
             st_formatado = "Pago" if st_raw in ["PAGO", "SIM", "1"] else "Não Pago"
             t_data.append({
@@ -119,7 +134,7 @@ def render(user, conn_proj, c_proj):
         key=f"editor_projeto_{proj_id}"
     )
 
-    # --- 4. CÁLCULOS E MÉTRICAS BLINDADOS ---
+    # --- 4. CÁLCULOS E MÉTRICAS ---
     val_gasto = 0.0
     val_a_gastar = 0.0
     custo_total_lançado = 0.0
@@ -128,9 +143,7 @@ def render(user, conn_proj, c_proj):
         custo_total_lançado = ed_itens['valor'].sum()
         
         if 'status' in ed_itens.columns:
-            # Limpa e converte para maiúsculo para garantir a soma exata sem falhas de acento/espaço
             status_limpo = ed_itens['status'].astype(str).str.strip().str.upper()
-            
             val_gasto = ed_itens[status_limpo.isin(['PAGO'])]['valor'].sum()
             val_a_gastar = ed_itens[status_limpo.isin(['NÃO PAGO', 'NAO PAGO'])]['valor'].sum()
         else:
@@ -149,17 +162,32 @@ def render(user, conn_proj, c_proj):
                 with connection.begin():
                     ids_atuais = [int(r['id']) for _, r in ed_itens.iterrows() if pd.notna(r.get('id'))]
                     
+                    # Exclui itens que foram removidos na tela (mantendo apenas os itens normais atuais)
                     if ids_atuais:
                         connection.execute(
-                            text("DELETE FROM projetos_itens WHERE projeto_id = :proj_id AND id NOT IN :ids"),
+                            text(f"DELETE FROM projetos_itens WHERE projeto_id = :proj_id AND {col_desc_real} != '_CUSTO_PREVISTO_' AND id NOT IN :ids"),
                             {"proj_id": int(proj_id), "ids": tuple(ids_atuais)}
                         )
                     else:
                         connection.execute(
-                            text("DELETE FROM projetos_itens WHERE projeto_id = :proj_id"),
+                            text(f"DELETE FROM projetos_itens WHERE projeto_id = :proj_id AND {col_desc_real} != '_CUSTO_PREVISTO_'"),
                             {"proj_id": int(proj_id)}
                         )
 
+                    # Salva ou atualiza o Custo Previsto de forma persistente no banco
+                    if not df_itens.empty and not df_prev.empty:
+                        prev_id = int(df_prev.iloc[0]['id'])
+                        connection.execute(
+                            text(f"UPDATE projetos_itens SET {col_val_real} = :val WHERE id = :id"),
+                            {"val": float(custo_esperado), "id": prev_id}
+                        )
+                    else:
+                        connection.execute(
+                            text(f"INSERT INTO projetos_itens (projeto_id, {col_desc_real}, {col_val_real}, {col_status_real}) VALUES (:proj_id, '_CUSTO_PREVISTO_', :val, 'Pago')"),
+                            {"proj_id": int(proj_id), "val": float(custo_esperado)}
+                        )
+
+                    # Salva os itens normais da tabela
                     for _, r in ed_itens.iterrows():
                         desc = str(r['descricao']) if pd.notna(r.get('descricao')) else ""
                         val = float(r['valor']) if pd.notna(r.get('valor')) else 0.0
