@@ -19,7 +19,7 @@ def render(user, conn_proj, c_proj):
             with engine.connect() as connection:
                 with connection.begin():
                     connection.execute(
-                        text("INSERT INTO projetos_lista (usuario, nome_projeto) VALUES (:usuario, :nome)"),
+                        text("INSERT INTO projetos_lista (usuario, nome_projeto, custo_previsto) VALUES (:usuario, :nome, 0.0)"),
                         {"usuario": user, "nome": novo_proj_nome.strip()}
                     )
             st.success(f"Projeto '{novo_proj_nome}' criado com sucesso!")
@@ -33,7 +33,7 @@ def render(user, conn_proj, c_proj):
     try:
         with engine.connect() as conn:
             df_projetos = pd.read_sql_query(
-                text("SELECT id, nome_projeto FROM projetos_lista WHERE usuario = :usuario"),
+                text("SELECT id, nome_projeto, custo_previsto FROM projetos_lista WHERE usuario = :usuario"),
                 conn,
                 params={"usuario": user}
             )
@@ -50,14 +50,31 @@ def render(user, conn_proj, c_proj):
     projeto_selecionado = st.selectbox("Selecione o Projeto:", nomes_projetos)
     proj_id = projetos_dict[projeto_selecionado]
 
+    # Busca o custo previsto atual do projeto
+    proj_atual = df_projetos[df_projetos['id'] == proj_id].iloc[0]
+    custo_previsto_atual = float(proj_atual.get('custo_previsto', 0.0) or 0.0)
+
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
+
+    # Campo para definir o Custo Previsto do Projeto
+    novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=custo_previsto_atual, format="%.2f")
+    if novo_custo_previsto != custo_previsto_atual:
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    connection.execute(
+                        text("UPDATE projetos_lista SET custo_previsto = :val WHERE id = :id AND usuario = :usuario"),
+                        {"val": novo_custo_previsto, "id": int(proj_id), "usuario": user}
+                    )
+        except Exception:
+            pass
 
     # --- 3. ITENS / GASTOS DO PROJETO SELECIONADO ---
     try:
         with engine.connect() as conn:
             df_itens = pd.read_sql_query(
-                text("SELECT id, projeto_id, descricao, valor, categoria FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id"),
+                text("SELECT id, projeto_id, descricao, valor, status FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id"),
                 conn,
                 params={"usuario": user, "proj_id": int(proj_id)}
             )
@@ -65,8 +82,10 @@ def render(user, conn_proj, c_proj):
         df_itens = pd.DataFrame()
 
     if df_itens.empty:
-        df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "categoria"])
+        df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
     else:
+        # Garante padronização do status para o selectbox
+        df_itens['status'] = df_itens['status'].apply(lambda x: "Pago" if str(x).strip().capitalize() == "Pago" else "Não Pago")
         df_edit_base = df_itens
 
     st.markdown("#### Lançamentos e Peças do Projeto")
@@ -77,7 +96,7 @@ def render(user, conn_proj, c_proj):
             "projeto_id": None,
             "descricao": st.column_config.TextColumn("Descrição da Peça / Serviço", width="large"),
             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            "categoria": st.column_config.TextColumn("Categoria / Oferecimento")
+            "status": st.column_config.SelectboxColumn("Status", options=["Não Pago", "Pago"], required=True)
         },
         hide_index=True,
         width="stretch",
@@ -85,8 +104,24 @@ def render(user, conn_proj, c_proj):
         key=f"editor_projeto_{proj_id}"
     )
 
-    total_projeto = ed_itens['valor'].sum() if not ed_itens.empty and 'valor' in ed_itens.columns else 0.0
-    st.metric("💰 Custo Total deste Projeto", f"R$ {total_projeto:,.2f}")
+    # --- 4. CÁLCULOS E MÉTRICAS ---
+    # Valor gasto = soma de todos os itens marcados como "Pago"
+    if not ed_itens.empty and 'valor' in ed_itens.columns and 'status' in ed_itens.columns:
+        val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
+        custo_total_itens = ed_itens['valor'].sum()
+    else:
+        val_gasto = 0.0
+        custo_total_itens = 0.0
+
+    # Valor a gastar (Diferença entre o previsto e o que já foi gasto, ou o total geral dependendo da regra)
+    val_a_gastar = novo_custo_previsto - val_gasto
+
+    st.markdown("")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🎯 Custo Previsto", f"R$ {novo_custo_previsto:,.2f}")
+    m2.metric("🟢 Valor Gasto (Pago)", f"R$ {val_gasto:,.2f}")
+    m3.metric("⏳ Valor a Gastar (Saldo)", f"R$ {val_a_gastar:,.2f}", delta=f"Total Itens: R$ {custo_total_itens:,.2f}")
+    st.markdown("")
 
     if st.button("💾 Salvar Alterações do Projeto", type="primary"):
         try:
@@ -108,18 +143,18 @@ def render(user, conn_proj, c_proj):
                     for _, r in ed_itens.iterrows():
                         desc = str(r['descricao']) if pd.notna(r['descricao']) else ""
                         val = float(r['valor']) if pd.notna(r['valor']) else 0.0
-                        cat = str(r['categoria']) if pd.notna(r['categoria']) else ""
+                        st_val = str(r['status']) if pd.notna(r['status']) else "Não Pago"
                         
                         if pd.notna(r.get('id')):
                             connection.execute(
-                                text("UPDATE projetos_itens SET descricao = :desc, valor = :val, categoria = :cat WHERE id = :id AND usuario = :usuario"),
-                                {"desc": desc, "val": val, "cat": cat, "id": int(r['id']), "usuario": user}
+                                text("UPDATE projetos_itens SET descricao = :desc, valor = :val, status = :status WHERE id = :id AND usuario = :usuario"),
+                                {"desc": desc, "val": val, "status": st_val, "id": int(r['id']), "usuario": user}
                             )
                         else:
                             if desc.strip() or val > 0:
                                 connection.execute(
-                                    text("INSERT INTO projetos_itens (usuario, projeto_id, descricao, valor, categoria) VALUES (:usuario, :proj_id, :desc, :val, :cat)"),
-                                    {"usuario": user, "proj_id": int(proj_id), "desc": desc, "val": val, "cat": cat}
+                                    text("INSERT INTO projetos_itens (usuario, projeto_id, descricao, valor, status) VALUES (:usuario, :proj_id, :desc, :val, :status)"),
+                                    {"usuario": user, "proj_id": int(proj_id), "desc": desc, "val": val, "status": st_val}
                                 )
             st.success("Projeto salvo com sucesso!")
             st.rerun()
