@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 from database import engine
 from sqlalchemy import text
+import pypdf
 
 class Transacao(BaseModel):
     data: str = Field(description="Data no formato YYYY-MM-DD")
@@ -29,13 +30,25 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
     st.subheader("Lançar Extrato ou Fatura")
 
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
-    arquivo_extrato = st.file_uploader("Faça upload (.csv, .ofx, .txt):", type=["csv", "ofx", "txt"])
+    
+    # Suporte a .pdf adicionado
+    arquivo_extrato = st.file_uploader("Faça upload (.csv, .ofx, .txt, .pdf):", type=["csv", "ofx", "txt", "pdf"])
     texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
 
     if st.button("Processar com IA", type="primary"):
         conteudo = ""
         if arquivo_extrato is not None:
-            conteudo = arquivo_extrato.getvalue().decode("utf-8", errors="ignore")
+            if arquivo_extrato.name.lower().endswith(".pdf"):
+                try:
+                    leitor_pdf = pypdf.PdfReader(arquivo_extrato)
+                    texto_extraido = ""
+                    for pagina in leitor_pdf.pages:
+                        texto_extraido += pagina.extract_text() or ""
+                    conteudo = texto_extraido
+                except Exception as ex_pdf:
+                    st.error(f"Erro ao ler o arquivo PDF: {ex_pdf}")
+            else:
+                conteudo = arquivo_extrato.getvalue().decode("utf-8", errors="ignore")
         elif texto_fatura.strip():
             conteudo = texto_fatura
 
@@ -66,7 +79,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     for tentativa in range(3):
                         try:
                             response = client.models.generate_content(
-                                model='models/gemini-3.6-flash', contents=prompt,
+                                model='models/gemini-2.5-flash', contents=prompt,
                                 config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
                             )
                             break

@@ -8,7 +8,7 @@ import json
 def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.subheader("⚙️ Configurações e Perfil")
 
-    # --- SEÇÃO DE PERFIL ---
+    # --- SEÇÃO DE EDITAR PERFIL ---
     st.write("#### 👤 Meu Perfil")
     user_data = c_fin.execute(f"SELECT email, senha, foto FROM usuarios WHERE username = '{user}'").fetchone()
     email_atual = user_data[0] if user_data and user_data[0] else ""
@@ -36,7 +36,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
-    # --- SEÇÃO DE ABAS VISÍVEIS PADRÃO ---
+    # --- SEÇÃO DE ABAS VISÍVEIS ---
     st.write("#### 🗂️ Gerenciar Abas Visíveis")
     st.caption("Escolha quais módulos extras você deseja exibir no seu menu superior:")
 

@@ -2,7 +2,7 @@ import streamlit as st
 import json
 from sqlalchemy import text
 from database import inicializar_bancos, engine, conn_fin, c_fin, conn_proj, c_proj, get_param, set_param
-from views import dashboard, importacao, lancamentos, dividas_casa, projetos, config_backup
+from views import dashboard, importacao, lancamentos, dividas_casa, projetos, config_backup, metas
 import pandas as pd
 
 st.set_page_config(page_title="Minhas Finanças", page_icon="💰", layout="wide")
@@ -84,7 +84,7 @@ tem_casa = get_param(user, "ativ_casa", padrao_ativado) == "1"
 tem_extra = get_param(user, "ativ_extra", padrao_ativado) == "1"
 tem_projetos = get_param(user, "ativ_projetos", padrao_ativado) == "1"
 
-# Busca as abas geradas por IA para este usuário
+# Busca as abas geradas por IA para este usuário[cite: 5, 8]
 try:
     with engine.connect() as conn:
         df_abas_ia = pd.read_sql_query(
@@ -95,12 +95,13 @@ try:
 except Exception:
     df_abas_ia = pd.DataFrame()
 
-# Monta o menu superior completo com as fixas e as de IA
+# Monta o menu superior completo com as fixas, metas e as criadas por IA[cite: 5]
 nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📋 Lançamentos e Edição"]
 if tem_divida: nomes_abas.append("📌 Dívida Fixa")
 if tem_casa: nomes_abas.append("❤️ Casa / Financiamento")
 if tem_extra: nomes_abas.append("🏠 Extra Casa")
 if tem_projetos: nomes_abas.append("🚗 Projetos e Reformas")
+nomes_abas.append("🎯 Metas de Economia")
 
 if not df_abas_ia.empty:
     for _, r in df_abas_ia.iterrows():
@@ -124,7 +125,9 @@ if tem_extra:
 if tem_projetos:
     with abas_criadas[idx]: projetos.render(user, conn_proj, c_proj); idx += 1
 
-# Renderiza as abas customizadas por IA
+with abas_criadas[idx]: metas.render(user, conn_proj, c_proj); idx += 1
+
+# Renderiza as abas customizadas por IA[cite: 5]
 if not df_abas_ia.empty:
     for _, aba in df_abas_ia.iterrows():
         aba_id = int(aba['id'])
