@@ -44,7 +44,6 @@ def render(user, conn_proj, c_proj):
         st.info("Nenhum projeto cadastrado ainda. Crie o seu primeiro projeto acima!")
         return
 
-    # Cria um dicionário de nomes para IDs
     projetos_dict = {row['nome_projeto']: row['id'] for _, row in df_projetos.iterrows()}
     nomes_projetos = list(projetos_dict.keys())
 
@@ -65,7 +64,6 @@ def render(user, conn_proj, c_proj):
     except Exception:
         df_itens = pd.DataFrame()
 
-    # Se não houver itens, cria um dataframe vazio padrão para o editor
     if df_itens.empty:
         df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "categoria"])
     else:
@@ -87,7 +85,6 @@ def render(user, conn_proj, c_proj):
         key=f"editor_projeto_{proj_id}"
     )
 
-    # Exibe o total gasto no projeto em destaque
     total_projeto = ed_itens['valor'].sum() if not ed_itens.empty and 'valor' in ed_itens.columns else 0.0
     st.metric("💰 Custo Total deste Projeto", f"R$ {total_projeto:,.2f}")
 
@@ -97,7 +94,6 @@ def render(user, conn_proj, c_proj):
                 with connection.begin():
                     ids_atuais = [int(r['id']) for _, r in ed_itens.iterrows() if pd.notna(r.get('id'))]
                     
-                    # Remove itens deletados na tela
                     if ids_atuais:
                         connection.execute(
                             text("DELETE FROM projetos_itens WHERE usuario = :usuario AND projeto_id = :proj_id AND id NOT IN :ids"),
@@ -109,7 +105,6 @@ def render(user, conn_proj, c_proj):
                             {"usuario": user, "proj_id": int(proj_id)}
                         )
 
-                    # Insere ou atualiza os itens
                     for _, r in ed_itens.iterrows():
                         desc = str(r['descricao']) if pd.notna(r['descricao']) else ""
                         val = float(r['valor']) if pd.notna(r['valor']) else 0.0
@@ -125,8 +120,8 @@ def render(user, conn_proj, c_proj):
                                 connection.execute(
                                     text("INSERT INTO projetos_itens (usuario, projeto_id, descricao, valor, categoria) VALUES (:usuario, :proj_id, :desc, :val, :cat)"),
                                     {"usuario": user, "proj_id": int(proj_id), "desc": desc, "val": val, "cat": cat}
-                                />
+                                )
             st.success("Projeto salvo com sucesso!")
             st.rerun()
         except Exception as e:
-            st.error(f"Erro ao salvar itens do projeto:[cite: 1] {e}")
+            st.error(f"Erro ao salvar itens do projeto: {e}")
