@@ -2,7 +2,7 @@ import streamlit as st
 import json
 from sqlalchemy import text
 from database import inicializar_bancos, engine, conn_fin, c_fin, conn_proj, c_proj, get_param, set_param
-from views import dashboard, importacao, lancamentos, projetos, config_backup
+from views import dashboard, importacao, lancamentos, dividas_casa, projetos, config_backup
 import pandas as pd
 
 st.set_page_config(page_title="Minhas Finanças", page_icon="💰", layout="wide")
@@ -77,6 +77,13 @@ with col_topo2:
 
 st.divider()
 
+# Preferências de abas ativadas padrão
+padrao_ativado = "1" if user == "alysson" else "0"
+tem_divida = get_param(user, "ativ_divida", padrao_ativado) == "1"
+tem_casa = get_param(user, "ativ_casa", padrao_ativado) == "1"
+tem_extra = get_param(user, "ativ_extra", padrao_ativado) == "1"
+tem_projetos = get_param(user, "ativ_projetos", padrao_ativado) == "1"
+
 # Busca as abas geradas por IA para este usuário
 try:
     with engine.connect() as conn:
@@ -88,11 +95,17 @@ try:
 except Exception:
     df_abas_ia = pd.DataFrame()
 
-# Monta o menu superior dinamicamente
-nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📋 Lançamentos e Edição", "🚗 Projetos e Reformas"]
+# Monta o menu superior completo com as fixas e as de IA
+nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📋 Lançamentos e Edição"]
+if tem_divida: nomes_abas.append("📌 Dívida Fixa")
+if tem_casa: nomes_abas.append("❤️ Casa / Financiamento")
+if tem_extra: nomes_abas.append("🏠 Extra Casa")
+if tem_projetos: nomes_abas.append("🚗 Projetos e Reformas")
+
 if not df_abas_ia.empty:
     for _, r in df_abas_ia.iterrows():
         nomes_abas.append(f"{r['icone']} {r['nome_aba']}")
+
 nomes_abas.append("⚙️ Regras e Backup")
 
 abas_criadas = st.tabs(nomes_abas)
@@ -101,9 +114,17 @@ idx = 0
 with abas_criadas[idx]: dashboard.render(user, conn_fin, CATEGORIAS_DESPESAS); idx += 1
 with abas_criadas[idx]: importacao.render(user, conn_fin, c_fin, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
 with abas_criadas[idx]: lancamentos.render(user, conn_fin, c_fin, TODAS_CATEGORIAS); idx += 1
-with abas_criadas[idx]: projetos.render(user, conn_fin, c_proj); idx += 1
 
-# Renderiza as abas customizadas por IA de forma dinâmica e isolada
+if tem_divida:
+    with abas_criadas[idx]: dividas_casa.render_divida(user, conn_proj, c_proj, get_param, set_param); idx += 1
+if tem_casa:
+    with abas_criadas[idx]: dividas_casa.render_casa(user, conn_proj, c_proj, get_param); idx += 1
+if tem_extra:
+    with abas_criadas[idx]: dividas_casa.render_extra_casa(user, conn_proj, c_proj, get_param); idx += 1
+if tem_projetos:
+    with abas_criadas[idx]: projetos.render(user, conn_proj, c_proj); idx += 1
+
+# Renderiza as abas customizadas por IA
 if not df_abas_ia.empty:
     for _, aba in df_abas_ia.iterrows():
         aba_id = int(aba['id'])
@@ -112,7 +133,6 @@ if not df_abas_ia.empty:
         with abas_criadas[idx]:
             st.subheader(f"{aba['icone']} {aba['nome_aba']}")
             
-            # Busca dados salvos desta aba no banco para este usuário
             try:
                 with engine.connect() as conn:
                     res_db = conn.execute(text("SELECT dados_json FROM dados_abas_ia WHERE aba_id = :aid AND usuario = :u"), {"aid": aba_id, "u": user}).fetchone()
@@ -120,7 +140,6 @@ if not df_abas_ia.empty:
             except Exception:
                 dados_atuais = []
 
-            # Configura colunas do editor dinamicamente com base no que a IA estruturou
             nomes_colunas_db = [c["nome"] for c in colunas_config]
             column_config_dict = {"id": None}
             
@@ -160,7 +179,6 @@ if not df_abas_ia.empty:
                     json_para_salvar = json.dumps(novos_dados)
                     with engine.connect() as connection:
                         with connection.begin():
-                            # Salva ou atualiza os dados isolados do usuário
                             existe = connection.execute(text("SELECT id FROM dados_abas_ia WHERE aba_id = :aid AND usuario = :u"), {"aid": aba_id, "u": user}).fetchone()
                             if existe:
                                 connection.execute(text("UPDATE dados_abas_ia SET dados_json = :dj WHERE aba_id = :aid AND usuario = :u"), {"dj": json_para_salvar, "aid": aba_id, "u": user})

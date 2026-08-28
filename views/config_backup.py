@@ -36,11 +36,32 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
+    # --- SEÇÃO DE ABAS VISÍVEIS PADRÃO ---
+    st.write("#### 🗂️ Gerenciar Abas Visíveis")
+    st.caption("Escolha quais módulos extras você deseja exibir no seu menu superior:")
+
+    padrao_ativado = "1" if user == "alysson" else "0"
+    
+    ativ_divida = st.checkbox("📌 Dívida Fixa", value=get_param(user, "ativ_divida", padrao_ativado) == "1")
+    ativ_casa = st.checkbox("❤️ Casa / Financiamento", value=get_param(user, "ativ_casa", padrao_ativado) == "1")
+    ativ_extra = st.checkbox("🏠 Extra Casa", value=get_param(user, "ativ_extra", padrao_ativado) == "1")
+    ativ_projetos = st.checkbox("🚗 Projetos e Reformas", value=get_param(user, "ativ_projetos", padrao_ativado) == "1")
+
+    if st.button("Salvar Preferências de Abas"):
+        set_param(user, "ativ_divida", "1" if ativ_divida else "0")
+        set_param(user, "ativ_casa", "1" if ativ_casa else "0")
+        set_param(user, "ativ_extra", "1" if ativ_extra else "0")
+        set_param(user, "ativ_projetos", "1" if ativ_projetos else "0")
+        st.success("Preferências salvas! Atualizando menu...")
+        st.rerun()
+
+    st.divider()
+
     # --- SEÇÃO DE CRIAÇÃO DE ABAS VIA IA ---
     st.write("#### 🤖 Criar Nova Aba Personalizada com Inteligência Artificial")
-    st.caption("Descreva o que você quer controlar (ex: 'Quero uma aba para planejar meu casamento com fornecedor, valor e status de pagamento' ou 'Controle de manutenções da moto'). A IA criará a aba para você:")
+    st.caption("Descreva o que você quer controlar (ex: 'Quero uma aba para planejar meu casamento com fornecedor, valor e status de pagamento'). A IA criará a aba para você[cite: 5]:")
 
-    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de gastos do meu setup do PC com nome da peça, loja, valor e se já comprei...")
+    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de gastos do meu setup do PC com nome da peça, loja, valor e status...")
 
     if st.button("✨ Gerar e Criar Aba com IA", type="primary"):
         if not api_key or api_key == "SUA_CHAVE_AQUI":
@@ -90,7 +111,6 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                 except Exception as e:
                     st.error(f"Erro ao gerar aba com IA: {e}")
 
-    # Lista abas criadas para exclusão
     try:
         with engine.connect() as conn:
             df_minhas_abas = pd.read_sql_query(
@@ -102,7 +122,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         df_minhas_abas = pd.DataFrame()
 
     if not df_minhas_abas.empty:
-        st.markdown("##### Suas Abas Personalizadas Atuais:")
+        st.markdown("##### Suas Abas Personalizadas por IA:")
         for _, r in df_minhas_abas.iterrows():
             col_del1, col_del2 = st.columns([4, 1])
             with col_del1:
@@ -126,3 +146,8 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv", type="secondary")
     except Exception:
         st.info("Ainda não há transações para exportar.")
+
+    st.divider()
+    df_regras = pd.read_sql_query(f"SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE usuario = '{user}'", conn_fin)
+    if not df_regras.empty:
+        st.dataframe(df_regras, use_container_width=True)
