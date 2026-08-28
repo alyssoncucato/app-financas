@@ -19,7 +19,7 @@ def render(user, conn_proj, c_proj):
             with engine.connect() as connection:
                 with connection.begin():
                     connection.execute(
-                        text("INSERT INTO projetos_lista (usuario, nome_projeto, custo_previsto) VALUES (:usuario, :nome, 0.0)"),
+                        text("INSERT INTO projetos_lista (usuario, nome_projeto) VALUES (:usuario, :nome)"),
                         {"usuario": user, "nome": novo_proj_nome.strip()}
                     )
             st.success(f"Projeto '{novo_proj_nome}' criado com sucesso!")
@@ -33,7 +33,7 @@ def render(user, conn_proj, c_proj):
     try:
         with engine.connect() as conn:
             df_projetos = pd.read_sql_query(
-                text("SELECT id, nome_projeto, custo_previsto FROM projetos_lista WHERE usuario = :usuario"),
+                text("SELECT id, nome_projeto FROM projetos_lista WHERE usuario = :usuario"),
                 conn,
                 params={"usuario": user}
             )
@@ -50,25 +50,15 @@ def render(user, conn_proj, c_proj):
     projeto_selecionado = st.selectbox("Selecione o Projeto:", nomes_projetos)
     proj_id = projetos_dict[projeto_selecionado]
 
-    # Busca o custo previsto atual do projeto
-    proj_atual = df_projetos[df_projetos['id'] == proj_id].iloc[0]
-    custo_previsto_atual = float(proj_atual.get('custo_previsto', 0.0) or 0.0)
-
     st.divider()
     st.markdown(f"### 🛠️ Gerenciamento do Projeto: **{projeto_selecionado}**")
 
-    # Campo para definir o Custo Previsto do Projeto
-    novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=custo_previsto_atual, format="%.2f")
-    if novo_custo_previsto != custo_previsto_atual:
-        try:
-            with engine.connect() as connection:
-                with connection.begin():
-                    connection.execute(
-                        text("UPDATE projetos_lista SET custo_previsto = :val WHERE id = :id AND usuario = :usuario"),
-                        {"val": novo_custo_previsto, "id": int(proj_id), "usuario": user}
-                    )
-        except Exception:
-            pass
+    # Campo interativo para definir o Custo Previsto do Projeto (armazenado na sessão do navegador)
+    if f"custo_prev_{proj_id}" not in st.session_state:
+        st.session_state[f"custo_prev_{proj_id}"] = 0.0
+
+    novo_custo_previsto = st.number_input("Custo Previsto Total do Projeto (R$):", value=st.session_state[f"custo_prev_{proj_id}"], format="%.2f", key=f"input_custo_{proj_id}")
+    st.session_state[f"custo_prev_{proj_id}"] = novo_custo_previsto
 
     # --- 3. ITENS / GASTOS DO PROJETO SELECIONADO ---
     try:
@@ -84,7 +74,6 @@ def render(user, conn_proj, c_proj):
     if df_itens.empty:
         df_edit_base = pd.DataFrame(columns=["id", "projeto_id", "descricao", "valor", "status"])
     else:
-        # Garante padronização do status para o selectbox
         df_itens['status'] = df_itens['status'].apply(lambda x: "Pago" if str(x).strip().capitalize() == "Pago" else "Não Pago")
         df_edit_base = df_itens
 
@@ -105,7 +94,6 @@ def render(user, conn_proj, c_proj):
     )
 
     # --- 4. CÁLCULOS E MÉTRICAS ---
-    # Valor gasto = soma de todos os itens marcados como "Pago"
     if not ed_itens.empty and 'valor' in ed_itens.columns and 'status' in ed_itens.columns:
         val_gasto = ed_itens[ed_itens['status'].astype(str).str.strip().str.capitalize() == 'Pago']['valor'].sum()
         custo_total_itens = ed_itens['valor'].sum()
@@ -113,7 +101,6 @@ def render(user, conn_proj, c_proj):
         val_gasto = 0.0
         custo_total_itens = 0.0
 
-    # Valor a gastar (Diferença entre o previsto e o que já foi gasto, ou o total geral dependendo da regra)
     val_a_gastar = novo_custo_previsto - val_gasto
 
     st.markdown("")
