@@ -119,7 +119,8 @@ with abas_criadas[idx]: lancamentos.render(user, conn_fin, c_fin, TODAS_CATEGORI
 if tem_divida:
     with abas_criadas[idx]: dividas_casa.render_divida(user, conn_proj, c_proj, get_param, set_param); idx += 1
 if tem_casa:
-    with abas_criadas[idx]: dividas_casa.render_casa(user, conn_proj, c_proj, get_param); idx += 1
+    # CORRIGIDO: Passando o set_param junto para a função render_casa
+    with abas_criadas[idx]: dividas_casa.render_casa(user, conn_proj, c_proj, get_param, set_param); idx += 1
 if tem_extra:
     with abas_criadas[idx]: dividas_casa.render_extra_casa(user, conn_proj, c_proj, get_param); idx += 1
 if tem_projetos:
