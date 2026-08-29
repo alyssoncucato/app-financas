@@ -234,13 +234,13 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         except Exception as e:
             st.error(f"Erro ao salvar gastos: {e}")
 
-def render_casa(user, conn_proj, c_proj, get_param):
+def render_casa(user, conn_proj, c_proj, get_param, set_param):
     t_casa = get_param(user, "casa_titulo", "CASA / FINANCIAMENTO")
     p1 = get_param(user, "participante_1", "Alysson")
     p2 = get_param(user, "participante_2", "Isabela")
     st.subheader(f"❤️ {t_casa}")
 
-    # --- CAMPOS DE CONFIGURAÇÃO DO FINANCIAMENTO (Salvos de forma persistente) ---
+    # --- CAMPOS DE CONFIGURAÇÃO DO FINANCIAMENTO ---
     val_fin_pego = float(get_param(user, "fin_valor_pego", "0.0"))
     val_fin_final = float(get_param(user, "fin_valor_final", "0.0"))
 
@@ -259,7 +259,6 @@ def render_casa(user, conn_proj, c_proj, get_param):
 
     try:
         with engine.connect() as conn:
-            # Busca TODOS os anos para calcular as métricas gerais corretas
             df_c_all = pd.read_sql_query(
                 text("SELECT id, ano, mes, col1, col2, col3, col4, val_p1, val_p2 FROM casa_despesas WHERE usuario = :usuario"),
                 conn,
@@ -336,7 +335,6 @@ def render_casa(user, conn_proj, c_proj, get_param):
 
     st.divider()
 
-    # --- CÁLCULOS E MÉTRICAS CONSOLIDADAS DE TODAS AS LANÇAMENTOS DE CASA ---
     if not df_c_all.empty:
         total_parcela_geral = df_c_all['col1'].sum()
         total_manutencao_geral = df_c_all['col2'].sum()
