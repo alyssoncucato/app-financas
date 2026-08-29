@@ -31,8 +31,16 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
     
-    # Adicionado accept_multiple_files=True para permitir selecionar vários arquivos de uma vez
-    arquivos_extrato = st.file_uploader("Faça upload de um ou mais arquivos (.csv, .ofx, .txt, .pdf):", type=["csv", "ofx", "txt", "pdf"], accept_multiple_files=True)
+    # Usamos uma chave no file_uploader para permitir limpar o componente programaticamente
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+    arquivos_extrato = st.file_uploader(
+        "Faça upload de um ou mais arquivos (.csv, .ofx, .txt, .pdf):", 
+        type=["csv", "ofx", "txt", "pdf"], 
+        accept_multiple_files=True,
+        key=f"file_uploader_{st.session_state.uploader_key}"
+    )
     texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
 
     if st.button("Processar com IA", type="primary"):
@@ -72,7 +80,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             total_itens_salvos = 0
             todos_itens_exibicao = []
 
-            # Processa cada arquivo/conteúdo separadamente na IA para garantir precisão
             for idx, conteudo in enumerate(conteudos):
                 with st.spinner(f"A IA está analisando o documento {idx + 1} de {len(conteudos)}..."):
                     prompt = f"""
@@ -129,5 +136,10 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             if todos_itens_exibicao:
                 st.dataframe(pd.DataFrame(todos_itens_exibicao), use_container_width=True)
                 st.success(f"Processamento concluído! Total de {total_itens_salvos} lançamentos salvos com sucesso no Supabase.")
+                
+                # Incrementa a chave para limpar automaticamente o file_uploader e recarrega a tela
+                st.session_state.uploader_key += 1
+                time.sleep(1.5)
+                st.rerun()
             else:
                 st.info("Nenhuma transação válida encontrada nos documentos fornecidos.")
