@@ -31,89 +31,103 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
     
-    arquivo_extrato = st.file_uploader("Faça upload (.csv, .ofx, .txt, .pdf):", type=["csv", "ofx", "txt", "pdf"])
+    # Adicionado accept_multiple_files=True para permitir selecionar vários arquivos de uma vez
+    arquivos_extrato = st.file_uploader("Faça upload de um ou mais arquivos (.csv, .ofx, .txt, .pdf):", type=["csv", "ofx", "txt", "pdf"], accept_multiple_files=True)
     texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
 
     if st.button("Processar com IA", type="primary"):
-        conteudo = ""
-        if arquivo_extrato is not None:
-            if arquivo_extrato.name.lower().endswith(".pdf"):
-                try:
-                    leitor_pdf = pypdf.PdfReader(arquivo_extrato)
-                    texto_extraido = ""
-                    for pagina in leitor_pdf.pages:
-                        texto_extraido += pagina.extract_text() or ""
-                    conteudo = texto_extraido
-                except Exception as ex_pdf:
-                    st.error(f"Erro ao ler o arquivo PDF: {ex_pdf}")
-            else:
-                conteudo = arquivo_extrato.getvalue().decode("utf-8", errors="ignore")
+        conteudos = []
+        
+        if arquivos_extrato:
+            for arq in arquivos_extrato:
+                if arq.name.lower().endswith(".pdf"):
+                    try:
+                        leitor_pdf = pypdf.PdfReader(arq)
+                        texto_extraido = ""
+                        for pagina in leitor_pdf.pages:
+                            texto_extraido += pagina.extract_text() or ""
+                        if texto_extraido.strip():
+                            conteudos.append(texto_extraido)
+                    except Exception as ex_pdf:
+                        st.error(f"Erro ao ler o arquivo PDF {arq.name}: {ex_pdf}")
+                else:
+                    texto_txt = arq.getvalue().decode("utf-8", errors="ignore")
+                    if texto_txt.strip():
+                        conteudos.append(texto_txt)
         elif texto_fatura.strip():
-            conteudo = texto_fatura
+            conteudos.append(texto_fatura)
 
         if not api_key or api_key == "SUA_CHAVE_AQUI":
             st.error("A chave da API do Gemini não foi configurada corretamente nos Secrets do Streamlit Cloud.")
-        elif not conteudo:
-            st.warning("Forneça o conteúdo do arquivo ou cole o texto.")
+        elif not conteudos:
+            st.warning("Forneça pelo menos um arquivo válido ou cole o texto.")
         else:
-            with st.spinner("A IA está analisando..."):
-                client = genai.Client(api_key=api_key)
-                ano_atual = datetime.now().year
-                origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
+            client = genai.Client(api_key=api_key)
+            ano_atual = datetime.now().year
+            origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
 
-                df_regras = pd.read_sql_query(f"SELECT termo_chave, categoria_destino FROM regras_categorias WHERE usuario = '{user}'", conn_fin)
-                regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()])
+            df_regras = pd.read_sql_query(f"SELECT termo_chave, categoria_destino FROM regras_categorias WHERE usuario = '{user}'", conn_fin)
+            regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()])
 
-                prompt = f"""
-                Ano: {ano_atual}. Tipo: {origem_doc}.
-                {regras_str}
-                IGNORAR: Pagamento de fatura anterior, transferências entre contas do mesmo titular, resgate RDB, Pix no Crédito.
-                CATEGORIAS: {', '.join(todas_categorias)}
-                Conteúdo:
-                {conteudo}
-                """
+            total_itens_salvos = 0
+            todos_itens_exibicao = []
 
-                try:
-                    response = None
-                    for tentativa in range(3):
-                        try:
-                            response = client.models.generate_content(
-                                model='models/gemini-3.6-flash', contents=prompt,
-                                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
-                            )
-                            break
-                        except Exception as ex:
-                            if "503" in str(ex) and tentativa < 2:
-                                time.sleep(2)
-                                continue
-                            raise ex
+            # Processa cada arquivo/conteúdo separadamente na IA para garantir precisão
+            for idx, conteudo in enumerate(conteudos):
+                with st.spinner(f"A IA está analisando o documento {idx + 1} de {len(conteudos)}..."):
+                    prompt = f"""
+                    Ano: {ano_atual}. Tipo: {origem_doc}.
+                    {regras_str}
+                    IGNORAR: Pagamento de fatura anterior, transferências entre contas do mesmo titular, resgate RDB, Pix no Crédito.
+                    CATEGORIAS: {', '.join(todas_categorias)}
+                    Conteúdo:
+                    {conteudo}
+                    """
 
-                    dados = json.loads(response.text)
-                    itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
-                    
-                    if itens:
-                        st.dataframe(pd.DataFrame(itens), use_container_width=True)
+                    try:
+                        response = None
+                        for tentativa in range(3):
+                            try:
+                                response = client.models.generate_content(
+                                    model='models/gemini-3.6-flash', contents=prompt,
+                                    config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
+                                )
+                                break
+                            except Exception as ex:
+                                if "503" in str(ex) and tentativa < 2:
+                                    time.sleep(2)
+                                    continue
+                                raise ex
+
+                        dados = json.loads(response.text)
+                        itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
                         
-                        with engine.connect() as connection:
-                            with connection.begin():
-                                for item in itens:
-                                    connection.execute(
-                                        text("""
-                                            INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem) 
-                                            VALUES (:u, :d, :desc, :v, :cat, :sf, :orig)
-                                        """),
-                                        {
-                                            "u": user,
-                                            "d": item['data'],
-                                            "desc": item['descricao'],
-                                            "v": item['valor'],
-                                            "cat": item['categoria'],
-                                            "sf": item['status_fatura'],
-                                            "orig": item['origem']
-                                        }
-                                    )
-                        st.success(f"{len(itens)} lançamentos salvos com sucesso no Supabase!")
-                    else:
-                        st.info("Nenhuma transação válida.")
-                except Exception as e:
-                    st.error(f"Erro: {e}")
+                        if itens:
+                            todos_itens_exibicao.extend(itens)
+                            with engine.connect() as connection:
+                                with connection.begin():
+                                    for item in itens:
+                                        connection.execute(
+                                            text("""
+                                                INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem) 
+                                                VALUES (:u, :d, :desc, :v, :cat, :sf, :orig)
+                                            """),
+                                            {
+                                                "u": user,
+                                                "d": item['data'],
+                                                "desc": item['descricao'],
+                                                "v": item['valor'],
+                                                "cat": item['categoria'],
+                                                "sf": item['status_fatura'],
+                                                "orig": item['origem']
+                                            }
+                                        )
+                                        total_itens_salvos += 1
+                    except Exception as e:
+                        st.error(f"Erro ao processar o arquivo {idx + 1}: {e}")
+
+            if todos_itens_exibicao:
+                st.dataframe(pd.DataFrame(todos_itens_exibicao), use_container_width=True)
+                st.success(f"Processamento concluído! Total de {total_itens_salvos} lançamentos salvos com sucesso no Supabase.")
+            else:
+                st.info("Nenhuma transação válida encontrada nos documentos fornecidos.")
