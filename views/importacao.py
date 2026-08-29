@@ -31,7 +31,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
     
-    # Suporte a .pdf adicionado
     arquivo_extrato = st.file_uploader("Faça upload (.csv, .ofx, .txt, .pdf):", type=["csv", "ofx", "txt", "pdf"])
     texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
 
@@ -78,8 +77,9 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     response = None
                     for tentativa in range(3):
                         try:
+                            # CORRIGIDO para o modelo ativo gemini-3.6-flash
                             response = client.models.generate_content(
-                                model='models/gemini-2.5-flash', contents=prompt,
+                                model='models/gemini-3.6-flash', contents=prompt,
                                 config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
                             )
                             break
