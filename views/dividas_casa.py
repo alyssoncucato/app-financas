@@ -12,7 +12,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     ano_s = st.selectbox("Ano:", [2025, 2026, 2027], index=1, key="select_ano_divida")
 
-    # --- 1. BUSCA DADOS DE TODOS OS ANOS PARA O CÁLCULO GLOBAL DE ABATIMENTO (PAGAMENTOS MENSAIS) ---
     try:
         with engine.connect() as conn:
             df_div_all = pd.read_sql_query(
@@ -34,7 +33,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     else:
         t_pago = 0.0
 
-    # --- 2. BUSCA ITENS DETALHADOS DA PLANILHA PARA O ANO SELECIONADO ---
     try:
         with engine.connect() as conn:
             df_gastos_db = pd.read_sql_query(
@@ -45,7 +43,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
     except Exception:
         df_gastos_db = pd.DataFrame()
 
-    # Itens padrão iniciais caso a tabela esteja vazia
     itens_padrao = [
         ("IR ALYSSON", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 1737.62, 868.82, 868.81, 0.0),
         ("IR ISABELA", "TENTATIVA DE COMPRA COM DECLARACAO DE IR", 201.61, 100.86, 100.85, 0.0),
@@ -86,12 +83,10 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     df_tabela_inicial = pd.DataFrame(t_div_tab)
 
-    # Cálculo dinâmico do total da dívida com base na coluna IVA dos itens da planilha
     v_tot = df_tabela_inicial["IVA (R$)"].sum()
     v_doa = 20000.00
     falta = v_tot - (t_pago + v_doa)
 
-    # Métricas Globais do Topo
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔴 Dívida Total (IVA)", f"R$ {v_tot:,.2f}")
     c2.metric("🟢 Pago Acumulado (IVA)", f"R$ {t_pago:,.2f}")
@@ -100,7 +95,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 3. TABELA DE PAGAMENTOS MENSAIS PARA A IVA ---
     st.markdown(f"### 💳 Pagamentos Mensais para a IVA — Ano {ano_s}")
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
@@ -171,10 +165,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
     st.divider()
 
-    # --- 4. TABELA DE DETALHAMENTO DOS GASTOS (COM BOTÃO DE ADICIONAR LINHAS '+') ---
     st.markdown("### 📋 Detalhamento dos Gastos da Dívida")
-
-    # Editor interativo com num_rows="dynamic" para permitir adicionar novos itens com '+'
     ed_div = st.data_editor(
         df_tabela_inicial,
         column_config={
@@ -192,7 +183,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         key=f"editor_dividas_{ano_s}"
     )
 
-    # --- RESUMO ANALÍTICO ENTRE A TABELA E O BOTÃO DE SALVAR ---
     resumo_p1 = ed_div[f"{p1} (R$)"].sum() if f"{p1} (R$)" in ed_div.columns else 0.0
     resumo_p2 = ed_div[f"{p2} (R$)"].sum() if f"{p2} (R$)" in ed_div.columns else 0.0
     resumo_iva = ed_div["IVA (R$)"].sum() if "IVA (R$)" in ed_div.columns else 0.0
@@ -208,10 +198,7 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
         try:
             with engine.connect() as connection:
                 with connection.begin():
-                    # IDs atuais na tela para controle de exclusão de linhas removidas no editor
                     ids_atuais = [int(r['id']) for _, r in ed_div.iterrows() if pd.notna(r.get('id'))]
-                    
-                    # Apaga do banco registros antigos da planilha que foram removidos pelo usuário na tela
                     if ids_atuais:
                         connection.execute(
                             text("DELETE FROM controle_divida WHERE usuario = :usuario AND ano = :ano AND (mes IS NULL OR mes = '') AND id NOT IN :ids"),
@@ -242,7 +229,6 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
                                     text("INSERT INTO controle_divida (usuario, ano, gasto, descricao, valor_total, val_p1, val_p2, iva) VALUES (:usuario, :ano, :gasto, :desc, :val, :vp1, :vp2, :iva)"),
                                     {"usuario": user, "ano": int(ano_s), "gasto": gasto, "desc": desc, "val": val, "vp1": vp1, "vp2": vp2, "iva": iva}
                                 )
-            
             st.success("Detalhamento dos gastos salvo com sucesso!")
             st.rerun()
         except Exception as e:
@@ -250,22 +236,41 @@ def render_divida(user, conn_proj, c_proj, get_param, set_param):
 
 def render_casa(user, conn_proj, c_proj, get_param):
     t_casa = get_param(user, "casa_titulo", "CASA / FINANCIAMENTO")
-    p1 = get_param(user, "participante_1", "Você")
-    p2 = get_param(user, "participante_2", "Parceiro(a)")
+    p1 = get_param(user, "participante_1", "Alysson")
+    p2 = get_param(user, "participante_2", "Isabela")
     st.subheader(f"❤️ {t_casa}")
+
+    # --- CAMPOS DE CONFIGURAÇÃO DO FINANCIAMENTO (Salvos de forma persistente) ---
+    val_fin_pego = float(get_param(user, "fin_valor_pego", "0.0"))
+    val_fin_final = float(get_param(user, "fin_valor_final", "0.0"))
+
+    st.markdown("##### 🏦 Parâmetros do Financiamento Imobiliário")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        novo_val_pego = st.number_input("Valor pego no financiamento (R$):", value=val_fin_pego, format="%.2f", key="input_fin_pego")
+    with col_f2:
+        novo_val_final = st.number_input("Valor aproximado final do financiamento (R$):", value=val_fin_final, format="%.2f", key="input_fin_final")
+
+    if novo_val_pego != val_fin_pego or novo_val_final != val_fin_final:
+        set_param(user, "fin_valor_pego", str(novo_val_pego))
+        set_param(user, "fin_valor_final", str(novo_val_final))
+
+    st.divider()
 
     try:
         with engine.connect() as conn:
-            df_c = pd.read_sql_query(
+            # Busca TODOS os anos para calcular as métricas gerais corretas
+            df_c_all = pd.read_sql_query(
                 text("SELECT id, ano, mes, col1, col2, col3, col4, val_p1, val_p2 FROM casa_despesas WHERE usuario = :usuario"),
                 conn,
                 params={"usuario": user}
             )
     except Exception:
-        df_c = pd.DataFrame()
+        df_c_all = pd.DataFrame()
 
     ano_c = st.selectbox("Ano Casa:", [2025, 2026, 2027], index=1, key="select_ano_casa")
-    df_ca = df_c[df_c['ano'] == int(ano_c)] if not df_c.empty else pd.DataFrame()
+    
+    df_ca = df_c_all[df_c_all['ano'] == int(ano_c)] if not df_c_all.empty else pd.DataFrame()
     meses = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
     
     t_c_tab = []
@@ -273,7 +278,7 @@ def render_casa(user, conn_proj, c_proj, get_param):
         r = df_ca[df_ca['mes'] == m] if not df_ca.empty else pd.DataFrame()
         if not r.empty:
             row = r.iloc[0]
-            t_c_tab.append({"id": row['id'], "Mês": m, "Parcela": float(row['col1']), "Manutenção": float(row['col2']), "Energia": float(row['col3']), "Água": float(row['col4']), f"{p1} Pago": float(row['val_p1']), f"{p2} Pago": float(row['val_p2'])})
+            t_c_tab.append({"id": row['id'], "Mês": m, "Parcela": float(row['col1'] or 0), "Manutenção": float(row['col2'] or 0), "Energia": float(row['col3'] or 0), "Água": float(row['col4'] or 0), f"{p1} Pago": float(row['val_p1'] or 0), f"{p2} Pago": float(row['val_p2'] or 0)})
         else:
             t_c_tab.append({"id": None, "Mês": m, "Parcela": 0.0, "Manutenção": 0.0, "Energia": 0.0, "Água": 0.0, f"{p1} Pago": 0.0, f"{p2} Pago": 0.0})
 
@@ -281,7 +286,13 @@ def render_casa(user, conn_proj, c_proj, get_param):
         pd.DataFrame(t_c_tab), 
         column_config={
             "id": None, 
-            "Mês": st.column_config.TextColumn("Mês", disabled=True)
+            "Mês": st.column_config.TextColumn("Mês", disabled=True),
+            "Parcela": st.column_config.NumberColumn("Parcela", format="R$ %.2f"),
+            "Manutenção": st.column_config.NumberColumn("Manutenção", format="R$ %.2f"),
+            "Energia": st.column_config.NumberColumn("Energia", format="R$ %.2f"),
+            "Água": st.column_config.NumberColumn("Água", format="R$ %.2f"),
+            f"{p1} Pago": st.column_config.NumberColumn(f"{p1} Pago", format="R$ %.2f"),
+            f"{p2} Pago": st.column_config.NumberColumn(f"{p2} Pago", format="R$ %.2f"),
         }, 
         hide_index=True, 
         width="stretch",
@@ -323,10 +334,43 @@ def render_casa(user, conn_proj, c_proj, get_param):
         except Exception as e:
             st.error(f"Erro ao salvar casa: {e}")
 
+    st.divider()
+
+    # --- CÁLCULOS E MÉTRICAS CONSOLIDADAS DE TODAS AS LANÇAMENTOS DE CASA ---
+    if not df_c_all.empty:
+        total_parcela_geral = df_c_all['col1'].sum()
+        total_manutencao_geral = df_c_all['col2'].sum()
+        total_p1_geral = df_c_all['val_p1'].sum()
+        total_p2_geral = df_c_all['val_p2'].sum()
+        total_geral_pago = total_p1_geral + total_p2_geral
+    else:
+        total_parcela_geral = 0.0
+        total_manutencao_geral = 0.0
+        total_p1_geral = 0.0
+        total_p2_geral = 0.0
+        total_geral_pago = 0.0
+
+    st.markdown("### 📊 Resumo Consolidado do Imóvel")
+    
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("🏠 Total Pago de Parcelas", f"R$ {total_parcela_geral:,.2f}")
+    mc2.metric("🛠️ Total Pago de Manutenção", f"R$ {total_manutencao_geral:,.2f}")
+    mc3.metric("💰 Valor Total Pago (Geral)", f"R$ {total_geral_pago:,.2f}")
+
+    mp1, mp2 = st.columns(2)
+    mp1.metric(f"🔵 Total Pago por {p1}", f"R$ {total_p1_geral:,.2f}")
+    mp2.metric(f"🩷 Total Pago por {p2}", f"R$ {total_p2_geral:,.2f}")
+
+    if novo_val_pego > 0 or novo_val_final > 0:
+        st.markdown("")
+        mf1, mf2 = st.columns(2)
+        mf1.metric("📌 Valor Pego no Financiamento", f"R$ {novo_val_pego:,.2f}")
+        mf2.metric("🎯 Valor Aproximado Final", f"R$ {novo_val_final:,.2f}")
+
 def render_extra_casa(user, conn_proj, c_proj, get_param):
     st.subheader("🏠 Extra Casa")
-    p1 = get_param(user, "participante_1", "Você")
-    p2 = get_param(user, "participante_2", "Parceiro(a)")
+    p1 = get_param(user, "participante_1", "Alysson")
+    p2 = get_param(user, "participante_2", "Isabela")
 
     try:
         with engine.connect() as conn:
