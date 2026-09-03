@@ -1,99 +1,52 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-from sqlalchemy import text
 
 def render(user, conn_fin, categorias_despesas):
     st.subheader("Resumo Financeiro")
-
-    try:
-        # Volta ao padrão original de busca isolada por usuário no banco
-        df = pd.read_sql_query(
-            text("SELECT * FROM transacoes WHERE usuario = :u"), 
-            conn_fin, 
-            params={"u": user}
-        )
-    except Exception:
-        df = pd.DataFrame()
-
-    if df.empty:
-        st.info("Nenhum registro encontrado para este usuário.")
-        return
-
-    df['data'] = pd.to_datetime(df['data'], errors='coerce')
-    df['mes_ano'] = df['data'].dt.strftime('%m/%Y')
+    df = pd.read_sql_query("SELECT * FROM transacoes WHERE usuario = ?", conn_fin, params=(user,))
     
-    meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
+    if not df.empty:
+        # Seletor de sub-abas no Dashboard
+        tab_geral, tab_cc_dash, tab_cartao_dash = st.tabs(["📊 Visão Consolidada", "🏦 Conta Corrente", "💳 Cartão de Crédito"])
 
-    escolha_mes = st.selectbox(
-        "📅 Mês:", 
-        ["Todos os Meses"] + meses_disponiveis, 
-        key="select_mes_dashboard"
-    )
+        # Função auxiliar com sufixo único na chave para evitar conflito
+        def exibir_metricas(df_subset, key_suffix):
+            if not df_subset.empty:
+                df_subset['data_dt'] = pd.to_datetime(df_subset['data'], errors='coerce')
+                df_subset['mes_ano'] = df_subset['data_dt'].dt.strftime('%m/%Y')
+                meses = sorted([m for m in df_subset['mes_ano'].dropna().unique()], reverse=True)
+                
+                # Chave garantidamente única baseada no sufixo da aba e no total de linhas
+                mes_sel = st.selectbox("📅 Mês:", ["Todos os Meses"] + meses, key=f"sel_mes_{key_suffix}_{df_subset.shape[0]}")
+                df_v = df_subset if mes_sel == "Todos os Meses" else df_subset[df_subset['mes_ano'] == mes_sel]
 
-    if escolha_mes != "Todos os Meses":
-        df_filtrado = df[df['mes_ano'] == escolha_mes]
+                ganhos = df_v[df_v['categoria'].isin(['Ganhos Fixos', 'Ganhos Variáveis'])]['valor'].sum()
+                desp = df_v[df_v['categoria'].isin(categorias_despesas)]['valor'].sum()
+                saldo = ganhos - desp
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("💰 Receitas", f"R$ {ganhos:,.2f}")
+                c2.metric("📉 Despesas", f"R$ {desp:,.2f}")
+                c3.metric("⚖️ Saldo", f"R$ {saldo:,.2f}", delta=f"{saldo:,.2f}")
+
+                st.divider()
+                for i in range(0, len(categorias_despesas), 4):
+                    cols = st.columns(4)
+                    for j, cat in enumerate(categorias_despesas[i:i+4]):
+                        cols[j].metric(cat, f"R$ {df_v[df_v['categoria'] == cat]['valor'].sum():,.2f}")
+            else:
+                st.info("Nenhum registro encontrado para este filtro.")
+
+        with tab_geral:
+            exibir_metricas(df, "geral")
+
+        with tab_cc_dash:
+            df_cc = df[df['origem'] == 'EXTRATO_CONTA']
+            exibir_metricas(df_cc, "cc")
+
+        with tab_cartao_dash:
+            df_cartao = df[df['origem'] == 'FATURA_CARTAO']
+            exibir_metricas(df_cartao, "cartao")
+            
     else:
-        df_filtrado = df
-
-    aba_visao, aba_cc, aba_cartao = st.tabs(["📊 Visão Consolidada", "🏦 Conta Corrente", "💳 Cartão de Crédito"])
-
-    with aba_visao:
-        _render_painel(df_filtrado, categorias_despesas, "Consolidado")
-
-    with aba_cc:
-        df_cc = df_filtrado[df_filtrado['origem'] == 'EXTRATO_CONTA']
-        _render_painel(df_cc, categorias_despesas, "Conta Corrente")
-
-    with aba_cartao:
-        df_cartao = df_filtrado[df_filtrado['origem'] == 'FATURA_CARTAO']
-        _render_painel(df_cartao, categorias_despesas, "Cartão de Crédito")
-
-def _render_painel(df_subset, categorias_despesas, tipo_visao):
-    if df_subset.empty:
-        st.warning(f"Nenhum lançamento encontrado para a visão: {tipo_visao}")
-        return
-
-    if tipo_visao == "Cartão de Crédito":
-        receitas = 0.0
-        despesas = df_subset['valor'].sum()
-        saldo = -despesas
-    elif tipo_visao == "Conta Corrente":
-        receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
-        despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"])]['valor'].sum()
-        saldo = receitas - despesas
-    else: # Consolidado
-        receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
-        despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]) & (df_subset['origem'] != 'FATURA_CARTAO')]['valor'].sum()
-        
-        total_cartao = df_subset[df_subset['origem'] == 'FATURA_CARTAO']['valor'].sum()
-        despesas += total_cartao
-        saldo = receitas - despesas
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Receitas", f"R$ {receitas:,.2f}")
-    col2.metric("📉 Despesas", f"R$ {despesas:,.2f}")
-    col3.metric("⚖️ Saldo", f"R$ {saldo:,.2f}", delta=f"R$ {saldo:,.2f}")
-
-    st.markdown("---")
-
-    cols_por_linha = 4
-    cat_com_gastos = [c for c in categorias_despesas if df_subset[df_subset['categoria'] == c]['valor'].sum() > 0]
-    outras_cats = [c for c in df_subset['categoria'].unique() if c not in categorias_despesas and c not in ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]]
-    todas_exibir = cat_com_gastos + outras_cats
-
-    for i in range(0, len(todas_exibir), cols_por_linha):
-        linha_cols = st.columns(cols_por_linha)
-        for j in range(cols_por_linha):
-            if i + j < len(todas_exibir):
-                cat = todas_exibir[i + j]
-                soma_cat = df_subset[df_subset['categoria'] == cat]['valor'].sum()
-                with linha_cols[j]:
-                    st.markdown(f"""
-                        <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px;">
-                            <span style="font-size: 14px; color: #aaa;">{cat}</span><br>
-                            <span style="font-size: 20px; font-weight: bold;">R$ {soma_cat:,.2f}</span>
-                        </div>
-                    """, unsafe_allow_html=True)
+        st.info("Nenhum registro encontrado para este usuário.")
