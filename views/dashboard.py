@@ -27,12 +27,7 @@ def render(user, conn_fin, categorias_despesas):
     
     mes_atual_str = datetime.now().strftime('%m/%Y')
 
-    aba_visao, aba_cc, aba_cartao = st.tabs(["📊 Visão Consolidada", "🏦 Conta Corrente", "💳 Cartão de Crédito"])
-
-    # Define o mês padrão inteligentemente:
-    # 1. Se o mês atual tiver dados, seleciona ele.
-    # 2. Se não tiver, seleciona o primeiro mês disponível mais recente (ex: agosto/2026).
-    # 3. Se não houver nada, deixa "Todos os Meses".
+    # Define o mês padrão inteligentemente
     default_index = 0
     if mes_atual_str in meses_disponiveis:
         default_index = meses_disponiveis.index(mes_atual_str) + 1
@@ -41,6 +36,7 @@ def render(user, conn_fin, categorias_despesas):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # O seletor de meses agora é renderizado sempre, antes de qualquer trava de DataFrame vazio
     escolha_mes = st.selectbox(
         "📅 Mês:", 
         ["Todos os Meses"] + meses_disponiveis, 
@@ -52,6 +48,8 @@ def render(user, conn_fin, categorias_despesas):
         df_filtrado = df[df['mes_ano'] == escolha_mes]
     else:
         df_filtrado = df
+
+    aba_visao, aba_cc, aba_cartao = st.tabs(["📊 Visão Consolidada", "🏦 Conta Corrente", "💳 Cartão de Crédito"])
 
     with aba_visao:
         _render_painel(df_filtrado, categorias_despesas, "Consolidado")
