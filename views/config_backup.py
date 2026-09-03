@@ -60,18 +60,20 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE GERENCIAR TODAS AS CATEGORIAS DE DESPESAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria (incluindo as antigas padrão).")
+    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria (padrão ou personalizadas).")
 
-    # Lista base padrão caso o usuário nunca tenha alterado nada
+    # Lista base padrão completa do sistema
     categorias_base_sistema = [
         "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
         "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
     ]
 
-    # Recupera do banco (se já houver lista salva, usa ela; senão, inicializa com a base)
+    # Recupera do banco as salvas e garante a fusão com a base caso venha faltando alguma
     cats_salvas_str = get_param(user, "categorias_personalizadas", "")
     if cats_salvas_str:
-        lista_atual_cats = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
+        salvas = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
+        # Garante que as padrão apareçam caso não tenham sido explicitamente apagadas pelo usuário
+        lista_atual_cats = sorted(list(set(categorias_base_sistema + salvas)), key=lambda x: (x not in categorias_base_sistema, x))
     else:
         lista_atual_cats = categorias_base_sistema.copy()
 
