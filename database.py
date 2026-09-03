@@ -1,262 +1,138 @@
+import os
 import streamlit as st
-import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
-# --- LEITURA DOS SECRETS DO STREAMLIT CLOUD ---
-DB_URL = st.secrets["DB_URL"]
+# Lê a URL do banco dos segredos do Streamlit
+DATABASE_URL = st.secrets.get("DATABASE_URL", "")
 
-# Engine de conexão otimizada
+if not DATABASE_URL:
+    st.error("Erro crítico: A variável DATABASE_URL não foi encontrada nos Secrets do Streamlit.")
+
+# Ajusta a URL para usar a porta de transação do Supabase (6579) se estiver usando o pooler da porta 5432
+# Isso evita o erro de "max clients reached"
+if "pooler.supabase.com" in DATABASE_URL and ":5432" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace(":5432", ":6579")
+
+# Engine configurada com pool_pre_ping e limite de conexões para não estourar o Supabase
 engine = create_engine(
-    DB_URL, 
-    connect_args={
-        "connect_timeout": 20
-    }
+    DATABASE_URL, 
+    pool_pre_ping=True, 
+    pool_size=3, 
+    max_overflow=2,
+    pool_recycle=300
 )
 
-class Psycopg2CursorProxy:
-    """Proxy universal para o cursor que substitui qualquer '?' por '%s'"""
-    def __init__(self, real_cursor):
-        self._cursor = real_cursor
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-    def execute(self, query, vars=None):
-        if isinstance(query, str):
-            query = query.replace("?", "%s")
-        return self._cursor.execute(query, vars)
+# Atalhos de conexão rápida compatíveis com o restante do app
+conn_fin = engine
+c_fin = engine
 
-    def executemany(self, query, seq_of_parameters):
-        if isinstance(query, str):
-            query = query.replace("?", "%s")
-        return self._cursor.executemany(query, seq_of_parameters)
-
-    def __getattr__(self, name):
-        return getattr(self._cursor, name)
-
-class EngineCompatWrapper:
-    """Wrapper para a engine para suportar métodos legados e interceptar o cursor do Pandas"""
-    def __init__(self, eng):
-        self._engine = eng
-
-    def __getattr__(self, name):
-        return getattr(self._engine, name)
-
-    def rollback(self):
-        pass
-
-    def commit(self):
-        pass
-
-    def cursor(self):
-        raw_conn = self._engine.raw_connection()
-        real_cur = raw_conn.cursor()
-        return Psycopg2CursorProxy(real_cur)
-
-conn_fin = EngineCompatWrapper(engine)
-conn_proj = EngineCompatWrapper(engine)
-
-class CursorAdapter:
-    def execute(self, query, params=None):
-        try:
-            with engine.connect() as conn:
-                with conn.begin():
-                    q_str = str(query).replace("?", "%s")
-                    q = text(q_str)
-                    
-                    if params:
-                        result = conn.execute(q, params)
-                    else:
-                        result = conn.execute(q)
-                    
-                    try:
-                        self.last_rows = result.fetchall()
-                    except Exception:
-                        self.last_rows = []
-        except Exception as e:
-            print(f"Erro no execute do banco: {e}")
-            self.last_rows = []
-        return self
-
-    def fetchone(self):
-        return self.last_rows[0] if self.last_rows else None
-
-    def fetchall(self):
-        return self.last_rows
-
-c_fin = CursorAdapter()
-c_proj = CursorAdapter()
+conn_proj = engine
+c_proj = engine
 
 def inicializar_bancos():
+    """Cria as tabelas essenciais no Supabase caso elas ainda nao existam."""
     try:
-        with engine.connect() as conn:
-            with conn.begin():
+        with engine.connect() as connection:
+            with connection.begin():
                 # Tabela de Usuários
-                conn.execute(text('''
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuarios (
                         id SERIAL PRIMARY KEY,
-                        username TEXT UNIQUE,
-                        senha TEXT,
-                        email TEXT DEFAULT '',
-                        foto TEXT DEFAULT ''
-                    )
-                '''))
+                        username TEXT UNIQUE NOT NULL,
+                        senha TEXT NOT NULL,
+                        email TEXT,
+                        foto TEXT
+                    );
+                """))
                 
-                # Tabela de Transações isoladas por usuário[cite: 8]
-                conn.execute(text('''
+                # Tabela de Transações (Extratos e Faturas)
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS transacoes (
                         id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        data TEXT,
-                        descricao TEXT,
-                        valor DOUBLE PRECISION,
-                        categoria TEXT,
+                        usuario TEXT NOT NULL,
+                        data TEXT NOT NULL,
+                        descricao TEXT NOT NULL,
+                        valor DOUBLE PRECISION NOT NULL,
+                        categoria TEXT NOT NULL,
                         status_fatura TEXT,
-                        origem TEXT DEFAULT 'FATURA_CARTAO'
-                    )
-                '''))
+                        origem TEXT
+                    );
+                """))
 
-                # Regras por usuário[cite: 8]
-                conn.execute(text('''
+                # Tabela de Regras de Categorias (Aprendizado da IA)
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS regras_categorias (
                         id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        termo_chave TEXT,
-                        categoria_destino TEXT,
-                        UNIQUE(usuario, termo_chave)
-                    )
-                '''))
+                        usuario TEXT NOT NULL,
+                        termo_chave TEXT NOT NULL,
+                        categoria_destino TEXT NOT NULL
+                    );
+                """))
 
-                # Parâmetros gerais por usuário[cite: 8]
-                conn.execute(text('''
+                # Tabela de Parâmetros Gerais / Configurações do Usuário
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS parametros_gerais (
                         id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        chave TEXT,
+                        usuario TEXT NOT NULL,
+                        chave TEXT NOT NULL,
                         valor TEXT,
                         UNIQUE(usuario, chave)
-                    )
-                '''))
+                    );
+                """))
 
-                # Projetos isolados por usuário[cite: 8]
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS projetos_lista (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        nome_projeto TEXT,
-                        UNIQUE(usuario, nome_projeto)
-                    )
-                '''))
-
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS projetos_itens (
-                        id SERIAL PRIMARY KEY,
-                        projeto_id INTEGER REFERENCES projetos_lista(id) ON DELETE CASCADE,
-                        item TEXT,
-                        valor DOUBLE PRECISION,
-                        status TEXT
-                    )
-                '''))
-
-                # Dívida fixa
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS controle_divida (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        ano INTEGER,
-                        mes TEXT,
-                        valor DOUBLE PRECISION,
-                        destino TEXT,
-                        gasto TEXT,
-                        descricao TEXT,
-                        valor_total DOUBLE PRECISION,
-                        val_p1 DOUBLE PRECISION,
-                        val_p2 DOUBLE PRECISION,
-                        iva DOUBLE PRECISION
-                    )
-                '''))
-
-                # Casa despesas
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS casa_despesas (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        ano INTEGER,
-                        mes TEXT,
-                        col1 DOUBLE PRECISION,
-                        col2 DOUBLE PRECISION,
-                        col3 DOUBLE PRECISION,
-                        col4 DOUBLE PRECISION,
-                        val_p1 DOUBLE PRECISION,
-                        val_p2 DOUBLE PRECISION
-                    )
-                '''))
-
-                # Extra casa
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS extra_casa (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        item TEXT,
-                        val_p1 DOUBLE PRECISION,
-                        val_p2 DOUBLE PRECISION
-                    )
-                '''))
-
-                # Abas Dinâmicas criadas por IA por usuário[cite: 5, 8]
-                conn.execute(text('''
+                # Tabela de Abas Personalizadas criadas por IA
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuario_abas_ia (
                         id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        nome_aba TEXT,
+                        usuario TEXT NOT NULL,
+                        nome_aba TEXT NOT NULL,
                         icone TEXT,
                         config_colunas TEXT
-                    )
-                '''))
+                    );
+                """))
 
-                # Dados genéricos para as abas criadas por IA[cite: 5, 8]
-                conn.execute(text('''
+                # Tabela de Dados das Abas Personalizadas
+                connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS dados_abas_ia (
                         id SERIAL PRIMARY KEY,
-                        aba_id INTEGER REFERENCES usuario_abas_ia(id) ON DELETE CASCADE,
-                        usuario TEXT,
+                        aba_id INT NOT NULL,
+                        usuario TEXT NOT NULL,
                         dados_json TEXT
-                    )
-                '''))
-
-                # Tabela de Metas de Economia[cite: 8]
-                conn.execute(text('''
-                    CREATE TABLE IF NOT EXISTS metas_economia (
-                        id SERIAL PRIMARY KEY,
-                        usuario TEXT,
-                        nome_meta TEXT,
-                        valor_alvo DOUBLE PRECISION,
-                        valor_atual DOUBLE PRECISION
-                    )
-                '''))
+                    );
+                """))
     except Exception as e:
-        print(f"Aviso de inicializacao: {e}")
+        st.error(f"Erro ao inicializar o banco de dados no Supabase: {e}")
 
-def get_param(user, chave, padrao):
+def get_param(usuario, chave, padrao=""):
+    """Busca um parâmetro salvo do usuário."""
     try:
         with engine.connect() as conn:
             res = conn.execute(
-                text("SELECT valor FROM parametros_gerais WHERE usuario = :u AND chave = :c"),
-                {"u": user, "c": chave}
+                text("SELECT valor FROM parametros_gerais WHERE LOWER(usuario) = LOWER(:u) AND chave = :c"),
+                {"u": usuario, "c": chave}
             ).fetchone()
-            return res[0] if res else padrao
+            if res and res[0] is not None:
+                return res[0]
     except Exception:
-        return padrao
+        pass
+    return padrao
 
-def set_param(user, chave, valor):
+def set_param(usuario, chave, valor):
+    """Salva ou atualiza um parâmetro do usuário no Supabase."""
     try:
-        with engine.connect() as conn:
-            with conn.begin():
-                conn.execute(
+        with engine.connect() as connection:
+            with connection.begin():
+                connection.execute(
                     text("""
                         INSERT INTO parametros_gerais (usuario, chave, valor) 
                         VALUES (:u, :c, :v)
                         ON CONFLICT (usuario, chave) 
-                        DO UPDATE SET valor = EXCLUDED.valor
+                        DO UPDATE SET valor = :v
                     """),
-                    {"u": user, "c": chave, "v": str(valor)}
+                    {"u": usuario, "c": chave, "v": str(valor)}
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Erro ao salvar parâmetro: {e}")
