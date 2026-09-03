@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import json
+json
 import time
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -31,7 +31,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
     tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
     
-    # Usamos uma chave no file_uploader para permitir limpar o componente programaticamente
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
@@ -74,10 +73,15 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             ano_atual = datetime.now().year
             origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
 
-            df_regras = pd.read_sql_query(f"SELECT termo_chave, categoria_destino FROM regras_categorias WHERE usuario = '{user}'", conn_fin)
-            regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()])
+            try:
+                df_regras = pd.read_sql_query(text("SELECT termo_chave, categoria_destino FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), conn_fin, params={"u": user})
+            except Exception:
+                df_regras = pd.DataFrame()
+
+            regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()]) if not df_regras.empty else ""
 
             total_itens_salvos = 0
+            total_itens_duplicados = 0
             todos_itens_exibicao = []
 
             for idx, conteudo in enumerate(conteudos):
@@ -110,36 +114,71 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                         itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
                         
                         if itens:
-                            todos_itens_exibicao.extend(itens)
                             with engine.connect() as connection:
+                                # Busca transações existentes do usuário para checagem rápida em memória/banco
+                                df_existentes = pd.read_sql_query(
+                                    text("SELECT data, descricao, valor, origem FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"),
+                                    connection,
+                                    params={"u": user}
+                                )
+
                                 with connection.begin():
                                     for item in itens:
-                                        connection.execute(
-                                            text("""
-                                                INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem) 
-                                                VALUES (:u, :d, :desc, :v, :cat, :sf, :orig)
-                                            """),
-                                            {
-                                                "u": user,
-                                                "d": item['data'],
-                                                "desc": item['descricao'],
-                                                "v": item['valor'],
-                                                "cat": item['categoria'],
-                                                "sf": item['status_fatura'],
-                                                "orig": item['origem']
-                                            }
-                                        )
-                                        total_itens_salvos += 1
+                                        # Trava anti-duplicação rigorosa: confere se já existe item idêntico salvo
+                                        duplicado = False
+                                        if not df_existentes.empty:
+                                            match = df_existentes[
+                                                (df_existentes['data'].astype(str).str.strip() == str(item['data']).strip()) &
+                                                (df_existentes['descricao'].astype(str).str.strip().lower() == str(item['descricao']).strip().lower()) &
+                                                (abs(df_existentes['valor'] - float(item['valor'])) < 0.01) &
+                                                (df_existentes['origem'].astype(str).str.strip() == str(item['origem']).strip())
+                                            ]
+                                            if not match.empty:
+                                                duplicado = True
+
+                                        if not duplicado:
+                                            connection.execute(
+                                                text("""
+                                                    INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem) 
+                                                    VALUES (:u, :d, :desc, :v, :cat, :sf, :orig)
+                                                """),
+                                                {
+                                                    "u": user,
+                                                    "d": item['data'],
+                                                    "desc": item['descricao'],
+                                                    "v": item['valor'],
+                                                    "cat": item['categoria'],
+                                                    "sf": item['status_fatura'],
+                                                    "orig": item['origem']
+                                                }
+                                            )
+                                            total_itens_salvos += 1
+                                            todos_itens_exibicao.append(item)
+                                            
+                                            # Adiciona ao dataframe local para evitar duplicação em lote caso o mesmo arquivo traga linhas repetidas
+                                            df_existentes = pd.concat([df_existentes, pd.DataFrame([{
+                                                "data": item['data'],
+                                                "descricao": item['descricao'],
+                                                "valor": item['valor'],
+                                                "origem": item['origem']
+                                            }])], ignore_index=True)
+                                        else:
+                                            total_itens_duplicados += 1
                     except Exception as e:
                         st.error(f"Erro ao processar o arquivo {idx + 1}: {e}")
 
-            if todos_itens_exibicao:
-                st.dataframe(pd.DataFrame(todos_itens_exibicao), use_container_width=True)
-                st.success(f"Processamento concluído! Total de {total_itens_salvos} lançamentos salvos com sucesso no Supabase.")
+            if todos_itens_exibicao or total_itens_duplicados > 0:
+                if todos_itens_exibicao:
+                    st.dataframe(pd.DataFrame(todos_itens_exibicao), use_container_width=True)
                 
-                # Incrementa a chave para limpar automaticamente o file_uploader e recarrega a tela
+                msg = f"Processamento concluído! **{total_itens_salvos}** novos lançamentos salvos."
+                if total_itens_duplicados > 0:
+                    msg += f" *({total_itens_duplicados} itens repetidos foram ignorados automaticamente para evitar duplicação)*."
+                
+                st.success(msg)
+                
                 st.session_state.uploader_key += 1
-                time.sleep(1.5)
+                time.sleep(2.0)
                 st.rerun()
             else:
-                st.info("Nenhuma transação válida encontrada nos documentos fornecidos.")
+                st.info("Nenhuma transação nova ou válida encontrada nos documentos fornecidos.")
