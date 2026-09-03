@@ -6,45 +6,30 @@ from sqlalchemy import text
 def render(user, conn_fin, categorias_despesas):
     st.subheader("Resumo Financeiro")
 
-    df_all = pd.DataFrame()
-    df = pd.DataFrame()
-
     try:
-        # Envolve a query em text() para o SQLAlchemy processar perfeitamente no Supabase
-        df_all = pd.read_sql_query(text("SELECT * FROM transacoes"), conn_fin)
-        
-        if not df_all.empty and 'usuario' in df_all.columns:
-            df = df_all[df_all['usuario'].astype(str).str.lower() == str(user).lower()]
-    except Exception as e:
-        st.error(f"Erro ao consultar banco: {e}")
+        # Volta ao padrão original de busca isolada por usuário no banco
+        df = pd.read_sql_query(
+            text("SELECT * FROM transacoes WHERE usuario = :u"), 
+            conn_fin, 
+            params={"u": user}
+        )
+    except Exception:
+        df = pd.DataFrame()
 
     if df.empty:
-        st.warning(f"⚠️ Nenhum registro encontrado para o usuário atual ('{user}').")
-        if not df_all.empty:
-            usuarios_no_banco = df_all['usuario'].unique()
-            st.info(f"💡 Dica: Existem registros no banco associados aos seguintes usuários: {list(usuarios_no_banco)}. Verifique se você logou com o nome exato.")
-        else:
-            st.info("💡 A tabela 'transacoes' no Supabase está completamente vazia. Faça uma importação na aba 'Importar com IA'.")
+        st.info("Nenhum registro encontrado para este usuário.")
         return
 
     df['data'] = pd.to_datetime(df['data'], errors='coerce')
     df['mes_ano'] = df['data'].dt.strftime('%m/%Y')
     
     meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-    mes_atual_str = datetime.now().strftime('%m/%Y')
-
-    default_index = 0
-    if mes_atual_str in meses_disponiveis:
-        default_index = meses_disponiveis.index(mes_atual_str) + 1
-    elif meses_disponiveis:
-        default_index = 1
-
+    
     st.markdown("<br>", unsafe_allow_html=True)
 
     escolha_mes = st.selectbox(
         "📅 Mês:", 
         ["Todos os Meses"] + meses_disponiveis, 
-        index=default_index if default_index < len(meses_disponiveis) + 1 else 0,
         key="select_mes_dashboard"
     )
 
@@ -68,7 +53,7 @@ def render(user, conn_fin, categorias_despesas):
 
 def _render_painel(df_subset, categorias_despesas, tipo_visao):
     if df_subset.empty:
-        st.info(f"Nenhum lançamento encontrado para esta visão no período selecionado.")
+        st.warning(f"Nenhum lançamento encontrado para a visão: {tipo_visao}")
         return
 
     if tipo_visao == "Cartão de Crédito":
@@ -79,7 +64,7 @@ def _render_painel(df_subset, categorias_despesas, tipo_visao):
         receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
         despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"])]['valor'].sum()
         saldo = receitas - despesas
-    else:
+    else: # Consolidado
         receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
         despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]) & (df_subset['origem'] != 'FATURA_CARTAO')]['valor'].sum()
         
