@@ -9,35 +9,30 @@ DATABASE_URL = st.secrets.get("DATABASE_URL", "")
 if not DATABASE_URL:
     st.error("Erro crítico: A variável DATABASE_URL não foi encontrada nos Secrets do Streamlit.")
 
-# Ajusta a URL para usar a porta de transação do Supabase (6579) se estiver usando o pooler da porta 5432
-# Isso evita o erro de "max clients reached"
+# Garante que a URL use a porta 6579 (Transaction Mode) para evitar esgotar conexões
 if "pooler.supabase.com" in DATABASE_URL and ":5432" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace(":5432", ":6579")
 
-# Engine configurada com pool_pre_ping e limite de conexões para não estourar o Supabase
+# Engine configurada com pool otimizado para transações rápidas
 engine = create_engine(
     DATABASE_URL, 
     pool_pre_ping=True, 
-    pool_size=3, 
-    max_overflow=2,
-    pool_recycle=300
+    pool_size=2, 
+    max_overflow=1,
+    pool_recycle=60
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Atalhos de conexão rápida compatíveis com o restante do app
 conn_fin = engine
 c_fin = engine
-
 conn_proj = engine
 c_proj = engine
 
 def inicializar_bancos():
-    """Cria as tabelas essenciais no Supabase caso elas ainda nao existam."""
     try:
         with engine.connect() as connection:
             with connection.begin():
-                # Tabela de Usuários
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuarios (
                         id SERIAL PRIMARY KEY,
@@ -47,8 +42,6 @@ def inicializar_bancos():
                         foto TEXT
                     );
                 """))
-                
-                # Tabela de Transações (Extratos e Faturas)
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS transacoes (
                         id SERIAL PRIMARY KEY,
@@ -61,8 +54,6 @@ def inicializar_bancos():
                         origem TEXT
                     );
                 """))
-
-                # Tabela de Regras de Categorias (Aprendizado da IA)
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS regras_categorias (
                         id SERIAL PRIMARY KEY,
@@ -71,8 +62,6 @@ def inicializar_bancos():
                         categoria_destino TEXT NOT NULL
                     );
                 """))
-
-                # Tabela de Parâmetros Gerais / Configurações do Usuário
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS parametros_gerais (
                         id SERIAL PRIMARY KEY,
@@ -82,8 +71,6 @@ def inicializar_bancos():
                         UNIQUE(usuario, chave)
                     );
                 """))
-
-                # Tabela de Abas Personalizadas criadas por IA
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuario_abas_ia (
                         id SERIAL PRIMARY KEY,
@@ -93,8 +80,6 @@ def inicializar_bancos():
                         config_colunas TEXT
                     );
                 """))
-
-                # Tabela de Dados das Abas Personalizadas
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS dados_abas_ia (
                         id SERIAL PRIMARY KEY,
@@ -107,7 +92,6 @@ def inicializar_bancos():
         st.error(f"Erro ao inicializar o banco de dados no Supabase: {e}")
 
 def get_param(usuario, chave, padrao=""):
-    """Busca um parâmetro salvo do usuário."""
     try:
         with engine.connect() as conn:
             res = conn.execute(
@@ -121,7 +105,6 @@ def get_param(usuario, chave, padrao=""):
     return padrao
 
 def set_param(usuario, chave, valor):
-    """Salva ou atualiza um parâmetro do usuário no Supabase."""
     try:
         with engine.connect() as connection:
             with connection.begin():
