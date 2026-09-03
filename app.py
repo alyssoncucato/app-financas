@@ -52,7 +52,7 @@ if st.session_state.usuario_logado is None:
                             with engine.connect() as connection:
                                 with connection.begin():
                                     connection.execute(text("INSERT INTO usuarios (username, senha) VALUES (:usr, :pwd)"), {"usr": novo_usr, "pwd": c_senha})
-                            st.success("Conta criada com sucesso! Tudo em branco e isolado para você.")
+                            st.success("Conta criada com sucesso!")
                         except Exception as e:
                             st.error(f"Erro ao criar conta: {e}")
                     else:
@@ -61,19 +61,28 @@ if st.session_state.usuario_logado is None:
 
 user = st.session_state.usuario_logado
 
-# --- CATEGORIAS DE DESPESAS (PADRÃO + CUSTOMIZADAS DO USUÁRIO) ---
+# --- CATEGORIAS DE DESPESAS ---
 CATEGORIAS_PADRAO_BASE = [
-    "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
-    "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
+    "ALUGUEL MÃE", "CARRO", "COMBUSTÍVEL", "COMIDA CASA", "COMIDA RUA", 
+    "COMPRAS INTERNET", "EDUCAÇÃO", "FUTILIDADE", "INTERNET", "INVESTIMENTOS", 
+    "JOGOS", "LAZER", "LUZ", "MANUTENÇÃO CASA", "NÃO SEI", "PAGAMENTO FATURA", 
+    "RESERVA", "ROUPAS", "SAÚDE", "ÁGUA"
 ]
-
 cats_salvas_str = get_param(user, "categorias_personalizadas", "")
 if cats_salvas_str:
     CATEGORIAS_DESPESAS = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
 else:
     CATEGORIAS_DESPESAS = CATEGORIAS_PADRAO_BASE
 
-TODAS_CATEGORIAS = CATEGORIAS_DESPESAS + ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]
+# --- TIPOS DE ENTRADAS / RECEITAS ---
+ENTRADAS_PADRAO_BASE = ["Ganhos Fixos", "Ganhos Variáveis"]
+entradas_salvas_str = get_param(user, "entradas_personalizadas", "")
+if entradas_salvas_str:
+    CATEGORIAS_ENTRADAS = [c.strip() for c in entradas_salvas_str.split(",") if c.strip()]
+else:
+    CATEGORIAS_ENTRADAS = ENTRADAS_PADRAO_BASE
+
+TODAS_CATEGORIAS = CATEGORIAS_DESPESAS + CATEGORIAS_ENTRADAS + ["Ignorar"]
 
 col_topo1, col_topo2 = st.columns([6, 1])
 with col_topo1:
@@ -117,7 +126,7 @@ nomes_abas.append("⚙️ Regras e Backup")
 abas_criadas = st.tabs(nomes_abas)
 
 idx = 0
-with abas_criadas[idx]: dashboard.render(user, engine, CATEGORIAS_DESPESAS); idx += 1
+with abas_criadas[idx]: dashboard.render(user, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS); idx += 1
 with abas_criadas[idx]: importacao.render(user, engine, engine, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
 with abas_criadas[idx]: lancamentos.render(user, engine, engine, TODAS_CATEGORIAS); idx += 1
 
@@ -168,7 +177,6 @@ if not df_abas_ia.empty:
                 df_base,
                 column_config=column_config_dict,
                 hide_index=True,
-                width="stretch",
                 num_rows="dynamic",
                 key=f"editor_ia_aba_{aba_id}"
             )

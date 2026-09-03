@@ -73,9 +73,9 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
-    # --- SEÇÃO DE GERENCIAR TODAS AS CATEGORIAS DE DESPESAS ---
+    # --- SEÇÃO DE GERENCIAR CATEGORIAS DE DESPESAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria.")
+    st.caption("Adicione, renomeie ou exclua categorias de despesas.")
 
     categorias_base_sistema = [
         "ALUGUEL MÃE", "CARRO", "COMBUSTÍVEL", "COMIDA CASA", "COMIDA RUA", 
@@ -87,7 +87,6 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     cats_salvas_str = get_param(user, "categorias_personalizadas", "")
     if cats_salvas_str:
         salvas = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
-        # Remove duplicadas insensíveis a maiúsculas/minúsculas mantendo a lista limpa
         vistas = set()
         lista_atual_cats = []
         for c in salvas:
@@ -99,51 +98,91 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         lista_atual_cats = categorias_base_sistema.copy()
 
     with st.form("form_nova_categoria"):
-        st.markdown("##### ➕ Adicionar Nova Categoria")
+        st.markdown("##### ➕ Adicionar Nova Categoria de Despesa")
         nova_cat_input = st.text_input("Nome da Nova Categoria:")
-        if st.form_submit_button("Criar Categoria", type="primary"):
+        if st.form_submit_button("Criar Categoria Despesa", type="primary"):
             if nova_cat_input.strip():
                 nome_novo = nova_cat_input.strip().upper()
                 if nome_novo not in [c.upper() for c in lista_atual_cats]:
                     lista_atual_cats.append(nome_novo)
                     set_param(user, "categorias_personalizadas", ", ".join(lista_atual_cats))
-                    st.success(f"Categoria '{nome_novo}' criada com sucesso! Atualizando...")
+                    st.success(f"Categoria '{nome_novo}' criada com sucesso!")
                     st.rerun()
                 else:
-                    st.warning("Essa categoria já existe na sua lista.")
+                    st.warning("Essa categoria já existe.")
             else:
                 st.warning("Digite o nome da categoria.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("##### ✏️ Editar ou Excluir Categorias Existentes")
-    st.caption("Modifique os nomes diretamente na tabela abaixo ou apague a linha inteira para excluir a categoria:")
-
-    df_cats = pd.DataFrame({"Categoria": lista_atual_cats})
-    
+    df_cats = pd.DataFrame({"Categoria Despesa": lista_atual_cats})
     ed_cats = st.data_editor(
         df_cats,
-        column_config={
-            "Categoria": st.column_config.TextColumn("Nome da Categoria", width="large", required=True)
-        },
-        hide_index=True,
-        num_rows="dynamic",
-        key="editor_todas_categorias"
+        column_config={"Categoria Despesa": st.column_config.TextColumn("Nome", width="large", required=True)},
+        hide_index=True, num_rows="dynamic", key="editor_todas_categorias"
     )
 
-    if st.button("💾 Salvar Alterações na Lista de Categorias", type="primary"):
-        novas_categorias = [str(r['Categoria']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria']) and str(r['Categoria']).strip()]
-        
-        # Remove duplicadas filtrando maiúsculas/minúsculas
-        novas_unicas = []
-        vistas = set()
+    if st.button("💾 Salvar Alterações nas Despesas", type="primary"):
+        novas_categorias = [str(r['Categoria Despesa']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria Despesa']) and str(r['Categoria Despesa']).strip()]
+        novas_unicas, vistas = [], set()
         for c in novas_categorias:
-            c_upper = c.upper()
-            if c_upper not in vistas:
-                vistas.add(c_upper)
+            if c.upper() not in vistas:
+                vistas.add(c.upper())
                 novas_unicas.append(c)
-
         set_param(user, "categorias_personalizadas", ", ".join(novas_unicas))
-        st.success("Lista de categorias atualizada com sucesso!")
+        st.success("Despesas atualizadas com sucesso!")
+        st.rerun()
+
+    st.divider()
+
+    # --- SEÇÃO DE GERENCIAR TIPOS DE ENTRADAS / RECEITAS ---
+    st.write("#### 💰 Gerenciar Tipos de Entradas / Receitas")
+    st.caption("Adicione, renomeie ou exclua as formas de recebimento (ex: Ganhos Fixos, Ganhos Variáveis, Salário, etc.).")
+
+    entradas_base_sistema = ["Ganhos Fixos", "Ganhos Variáveis"]
+    entradas_salvas_str = get_param(user, "entradas_personalizadas", "")
+    if entradas_salvas_str:
+        salvas_ent = [c.strip() for c in entradas_salvas_str.split(",") if c.strip()]
+        vistas_ent = set()
+        lista_atual_entradas = []
+        for c in salvas_ent:
+            c_upper = c.upper()
+            if c_upper not in vistas_ent:
+                vistas_ent.add(c_upper)
+                lista_atual_entradas.append(c)
+    else:
+        lista_atual_entradas = entradas_base_sistema.copy()
+
+    with st.form("form_nova_entrada"):
+        st.markdown("##### ➕ Adicionar Novo Tipo de Entrada")
+        nova_ent_input = st.text_input("Nome do Tipo de Entrada:")
+        if st.form_submit_button("Criar Tipo de Entrada", type="primary"):
+            if nova_ent_input.strip():
+                nome_novo_ent = nova_ent_input.strip()
+                if nome_novo_ent.upper() not in [c.upper() for c in lista_atual_entradas]:
+                    lista_atual_entradas.append(nome_novo_ent)
+                    set_param(user, "entradas_personalizadas", ", ".join(lista_atual_entradas))
+                    st.success(f"Tipo de entrada '{nome_novo_ent}' criado com sucesso!")
+                    st.rerun()
+                else:
+                    st.warning("Esse tipo de entrada já existe.")
+            else:
+                st.warning("Digite o nome da entrada.")
+
+    df_ents = pd.DataFrame({"Tipo de Entrada": lista_atual_entradas})
+    ed_ents = st.data_editor(
+        df_ents,
+        column_config={"Tipo de Entrada": st.column_config.TextColumn("Nome", width="large", required=True)},
+        hide_index=True, num_rows="dynamic", key="editor_todas_entradas"
+    )
+
+    if st.button("💾 Salvar Alterações nas Entradas", type="primary"):
+        novas_entradas = [str(r['Tipo de Entrada']).strip() for _, r in ed_ents.iterrows() if pd.notna(r['Tipo de Entrada']) and str(r['Tipo de Entrada']).strip()]
+        novas_unicas_ent, vistas_ent = [], set()
+        for c in novas_entradas:
+            if c.upper() not in vistas_ent:
+                vistas_ent.add(c.upper())
+                novas_unicas_ent.append(c)
+        set_param(user, "entradas_personalizadas", ", ".join(novas_unicas_ent))
+        st.success("Entradas atualizadas com sucesso!")
         st.rerun()
 
     st.divider()
