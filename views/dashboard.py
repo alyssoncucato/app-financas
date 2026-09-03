@@ -16,27 +16,24 @@ def render(user, conn_fin, categorias_despesas):
         df = pd.DataFrame()
 
     if df.empty:
-        st.info("Nenhum registro encontrado para este usuário.")
+        st.info("Nenhum registro encontrado para este usuário. Faça importações na aba 'Importar com IA'.")
         return
 
     df['data'] = pd.to_datetime(df['data'], errors='coerce')
     df['mes_ano'] = df['data'].dt.strftime('%m/%Y')
     
-    # Ordena os meses cronologicamente do mais recente para o mais antigo
     meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
     
     mes_atual_str = datetime.now().strftime('%m/%Y')
 
-    # Define o mês padrão inteligentemente
     default_index = 0
     if mes_atual_str in meses_disponiveis:
         default_index = meses_disponiveis.index(mes_atual_str) + 1
     elif meses_disponiveis:
-        default_index = 1  # Pega o mês mais recente com registros
+        default_index = 1
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # O seletor de meses agora é renderizado sempre, antes de qualquer trava de DataFrame vazio
     escolha_mes = st.selectbox(
         "📅 Mês:", 
         ["Todos os Meses"] + meses_disponiveis, 
@@ -64,7 +61,7 @@ def render(user, conn_fin, categorias_despesas):
 
 def _render_painel(df_subset, categorias_despesas, tipo_visao):
     if df_subset.empty:
-        st.warning(f"Nenhum lançamento encontrado para a visão: {tipo_visao}")
+        st.warning(f"Nenhum lançamento encontrado para esta visão no período selecionado.")
         return
 
     if tipo_visao == "Cartão de Crédito":
