@@ -61,18 +61,17 @@ if st.session_state.usuario_logado is None:
 
 user = st.session_state.usuario_logado
 
-# --- CATEGORIAS PADRÃO E PERSONALIZADAS ---
-CATEGORIAS_PADRAO = [
+# --- CATEGORIAS DE DESPESAS (PADRÃO + CUSTOMIZADAS DO USUÁRIO) ---
+CATEGORIAS_PADRAO_BASE = [
     "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
     "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
 ]
 
 cats_salvas_str = get_param(user, "categorias_personalizadas", "")
 if cats_salvas_str:
-    extras = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
-    CATEGORIAS_DESPESAS = sorted(list(set(CATEGORIAS_PADRAO + extras)))
+    CATEGORIAS_DESPESAS = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
 else:
-    CATEGORIAS_DESPESAS = CATEGORIAS_PADRAO
+    CATEGORIAS_DESPESAS = CATEGORIAS_PADRAO_BASE
 
 TODAS_CATEGORIAS = CATEGORIAS_DESPESAS + ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]
 

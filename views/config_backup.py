@@ -58,19 +58,22 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
-    # --- SEÇÃO DE GERENCIAR CATEGORIAS PERSONALIZADAS ---
+    # --- SEÇÃO DE GERENCIAR TODAS AS CATEGORIAS DE DESPESAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    
-    categorias_padrao_lista = [
+    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria (incluindo as antigas padrão).")
+
+    # Lista base padrão caso o usuário nunca tenha alterado nada
+    categorias_base_sistema = [
         "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
         "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
     ]
-    st.markdown(f"**📌 Categorias Padrão do Sistema (Fixas):**\n" + ", ".join([f"`{c}`" for c in categorias_padrao_lista]))
-    
-    st.markdown("<br>", unsafe_allow_html=True)
 
-    cats_atuais_str = get_param(user, "categorias_personalizadas", "")
-    lista_cats_atuais = [c.strip() for c in cats_atuais_str.split(",") if c.strip()]
+    # Recupera do banco (se já houver lista salva, usa ela; senão, inicializa com a base)
+    cats_salvas_str = get_param(user, "categorias_personalizadas", "")
+    if cats_salvas_str:
+        lista_atual_cats = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
+    else:
+        lista_atual_cats = categorias_base_sistema.copy()
 
     # Formulário para Adicionar Nova Categoria
     with st.form("form_nova_categoria"):
@@ -79,49 +82,44 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         if st.form_submit_button("Criar Categoria", type="primary"):
             if nova_cat_input.strip():
                 nome_novo = nova_cat_input.strip()
-                todas_existentes = [c.lower() for c in categorias_padrao_lista + lista_cats_atuais]
-                
-                if nome_novo.lower() not in todas_existentes:
-                    lista_cats_atuais.append(nome_novo)
-                    set_param(user, "categorias_personalizadas", ", ".join(lista_cats_atuais))
+                if nome_novo.lower() not in [c.lower() for c in lista_atual_cats]:
+                    lista_atual_cats.append(nome_novo)
+                    set_param(user, "categorias_personalizadas", ", ".join(lista_atual_cats))
                     st.success(f"Categoria '{nome_novo}' criada com sucesso! Atualizando...")
                     st.rerun()
                 else:
-                    st.warning("Essa categoria já existe.")
+                    st.warning("Essa categoria já existe na sua lista.")
             else:
                 st.warning("Digite o nome da categoria.")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("##### ✏️ Editar ou Excluir Suas Categorias Personalizadas")
-    st.caption("Você pode alterar diretamente o nome na tabela abaixo ou apagar a linha para excluir:")
+    st.markdown("##### ✏️ Editar ou Excluir Categorias Existentes")
+    st.caption("Modifique os nomes diretamente na tabela abaixo ou apague a linha inteira para excluir a categoria:")
 
-    if lista_cats_atuais:
-        df_cats = pd.DataFrame({"Categoria": lista_cats_atuais})
+    df_cats = pd.DataFrame({"Categoria": lista_atual_cats})
+    
+    ed_cats = st.data_editor(
+        df_cats,
+        column_config={
+            "Categoria": st.column_config.TextColumn("Nome da Categoria", width="large", required=True)
+        },
+        hide_index=True,
+        num_rows="dynamic",
+        key="editor_todas_categorias"
+    )
+
+    if st.button("💾 Salvar Alterações na Lista de Categorias", type="primary"):
+        novas_categorias = [str(r['Categoria']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria']) and str(r['Categoria']).strip()]
         
-        ed_cats = st.data_editor(
-            df_cats,
-            column_config={
-                "Categoria": st.column_config.TextColumn("Nome da Categoria", width="large", required=True)
-            },
-            hide_index=True,
-            num_rows="dynamic",
-            key="editor_categorias_custom"
-        )
+        # Remove duplicadas mantendo a ordem
+        novas_unicas = []
+        for c in novas_categorias:
+            if c not in novas_unicas:
+                novas_unicas.append(c)
 
-        if st.button("💾 Salvar Alterações / Exclusões de Categorias", type="primary"):
-            novas_categorias = [str(r['Categoria']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria']) and str(r['Categoria']).strip()]
-            
-            # Remove duplicadas mantendo a ordem
-            novas_categorias_unicas = []
-            for c in novas_categorias:
-                if c not in novas_categorias_unicas:
-                    novas_categorias_unicas.append(c)
-
-            set_param(user, "categorias_personalizadas", ", ".join(novas_categorias_unicas))
-            st.success("Categorias atualizadas com sucesso!")
-            st.rerun()
-    else:
-        st.info("Você ainda não tem categorias personalizadas cadastradas para editar.")
+        set_param(user, "categorias_personalizadas", ", ".join(novas_unicas))
+        st.success("Lista de categorias atualizada com sucesso!")
+        st.rerun()
 
     st.divider()
 
