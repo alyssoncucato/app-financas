@@ -10,12 +10,15 @@ DATABASE_URL = st.secrets.get("DATABASE_URL", "")
 if not DATABASE_URL:
     st.error("Erro crítico: A variável DATABASE_URL não foi encontrada nos Secrets do Streamlit.")
 
-# Garante que a URL use a porta 6543 (Transaction Mode) do Supabase
-if "pooler.supabase.com" in DATABASE_URL and ":5432" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace(":5432", ":6543")
+# Força a conversão para a porta 6543 (Transaction Mode do Supabase)
+if "pooler.supabase.com" in DATABASE_URL:
+    if ":5432" in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace(":5432", ":6543")
+    elif ":6543" not in DATABASE_URL:
+        # Se por acaso não tiver porta, injeta a 6543 antes do /postgres
+        DATABASE_URL = DATABASE_URL.replace(".pooler.supabase.com/postgres", ".pooler.supabase.com:6543/postgres")
 
-# NullPool faz com que cada requisição abra e feche a conexão instantaneamente, 
-# evitando qualquer travamento de limite de pool no Supabase.
+# NullPool garante zero conexões presas no Supabase
 engine = create_engine(
     DATABASE_URL, 
     poolclass=NullPool,
