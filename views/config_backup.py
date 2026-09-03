@@ -58,6 +58,44 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
+    # --- SEÇÃO DE GERENCIAR CATEGORIAS PERSONALIZADAS ---
+    st.write("#### 🏷️ Gerenciar Categorias de Despesas")
+    st.caption("Adicione novas categorias personalizadas (ex: Aluguel, Manutenção Casa, etc.):")
+
+    cats_atuais_str = get_param(user, "categorias_personalizadas", "")
+    lista_cats_atuais = [c.strip() for c in cats_atuais_str.split(",") if c.strip()]
+
+    if lista_cats_atuais:
+        st.write(f"**Suas categorias extras cadastradas:** {', '.join(lista_cats_atuais)}")
+    else:
+        st.info("Nenhuma categoria extra cadastrada ainda.")
+
+    with st.form("form_nova_categoria"):
+        nova_cat_input = st.text_input("Nome da Nova Categoria:")
+        if st.form_submit_button("➕ Adicionar Categoria", type="primary"):
+            if nova_cat_input.strip():
+                nome_novo = nova_cat_input.strip()
+                if nome_novo.lower() not in [c.lower() for c in lista_cats_atuais]:
+                    lista_cats_atuais.append(nome_novo)
+                    set_param(user, "categorias_personalizadas", ", ".join(lista_cats_atuais))
+                    st.success(f"Categoria '{nome_novo}' criada com sucesso! Atualizando...")
+                    st.rerun()
+                else:
+                    st.warning("Essa categoria já existe.")
+            else:
+                st.warning("Digite o nome da categoria.")
+
+    if lista_cats_atuais:
+        cat_para_remover = st.selectbox("Selecione uma categoria extra para remover:", ["Selecione..."] + lista_cats_atuais)
+        if st.button("🗑️ Remover Categoria Selecionada", type="secondary"):
+            if cat_para_remover != "Selecione...":
+                lista_cats_atuais = [c for c in lista_cats_atuais if c.lower() != cat_para_remover.lower()]
+                set_param(user, "categorias_personalizadas", ", ".join(lista_cats_atuais))
+                st.success(f"Categoria '{cat_para_remover}' removida!")
+                st.rerun()
+
+    st.divider()
+
     # --- SEÇÃO DE CRIAÇÃO DE ABAS VIA IA ---
     st.write("#### 🤖 Criar Nova Aba Personalizada com Inteligência Artificial")
     st.caption("Descreva o que você quer controlar. A IA criará a aba para você:")
@@ -70,7 +108,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         elif not descricao_aba_ia.strip():
             st.warning("Descreva o que deseja para a IA poder criar.")
         else:
-            with st.spinner("A IA está estruturando sua nova aba (tentando conectar)..."):
+            with st.spinner("A IA está estruturando sua nova aba..."):
                 try:
                     client = genai.Client(api_key=api_key)
                     prompt = f"""

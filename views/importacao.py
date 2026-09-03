@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-json
+import json
 import time
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -15,11 +15,7 @@ class Transacao(BaseModel):
     data: str = Field(description="Data no formato YYYY-MM-DD")
     descricao: str = Field(description="Nome do estabelecimento, recebedor ou pagador")
     valor: float = Field(description="Valor numérico")
-    categoria: Literal[
-        "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina", 
-        "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", 
-        "Não sei", "Ganhos Fixos", "Ganhos Variáveis", "Ignorar"
-    ]
+    categoria: str = Field(description="Categoria da despesa ou ganho")
     status_fatura: Literal["ABERTA", "FECHADA", "CONTA_CORRENTE"]
     origem: Literal["FATURA_CARTAO", "EXTRATO_CONTA"]
 
@@ -90,7 +86,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     Ano: {ano_atual}. Tipo: {origem_doc}.
                     {regras_str}
                     IGNORAR: Pagamento de fatura anterior, transferências entre contas do mesmo titular, resgate RDB, Pix no Crédito.
-                    CATEGORIAS: {', '.join(todas_categorias)}
+                    CATEGORIAS DISPONÍVEIS: {', '.join(todas_categorias)}
                     Conteúdo:
                     {conteudo}
                     """
@@ -115,7 +111,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                         
                         if itens:
                             with engine.connect() as connection:
-                                # Busca transações existentes do usuário para checagem rápida em memória/banco
                                 df_existentes = pd.read_sql_query(
                                     text("SELECT data, descricao, valor, origem FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"),
                                     connection,
@@ -124,7 +119,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
                                 with connection.begin():
                                     for item in itens:
-                                        # Trava anti-duplicação rigorosa: confere se já existe item idêntico salvo
                                         duplicado = False
                                         if not df_existentes.empty:
                                             match = df_existentes[
@@ -155,7 +149,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                             total_itens_salvos += 1
                                             todos_itens_exibicao.append(item)
                                             
-                                            # Adiciona ao dataframe local para evitar duplicação em lote caso o mesmo arquivo traga linhas repetidas
                                             df_existentes = pd.concat([df_existentes, pd.DataFrame([{
                                                 "data": item['data'],
                                                 "descricao": item['descricao'],
