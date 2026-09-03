@@ -238,4 +238,8 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
     try:
-        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria
+        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
+        if not df_regras.empty:
+            st.dataframe(df_regras, use_container_width=True)
+    except Exception:
+        pass
