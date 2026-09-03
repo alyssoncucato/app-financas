@@ -25,25 +25,21 @@ def render(user, conn_fin, categorias_despesas):
     # Ordena os meses cronologicamente do mais recente para o mais antigo
     meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
     
-    # Descobre qual é o mês atual no formato MM/AAAA (ex: '09/2026')
     mes_atual_str = datetime.now().strftime('%m/%Y')
 
     aba_visao, aba_cc, aba_cartao = st.tabs(["📊 Visão Consolidada", "🏦 Conta Corrente", "💳 Cartão de Crédito"])
 
-    # Define o mês padrão: se o mês atual existir nos dados, seleciona ele; senão, pega o primeiro da lista
+    # Define o mês padrão inteligentemente:
+    # 1. Se o mês atual tiver dados, seleciona ele.
+    # 2. Se não tiver, seleciona o primeiro mês disponível mais recente (ex: agosto/2026).
+    # 3. Se não houver nada, deixa "Todos os Meses".
     default_index = 0
     if mes_atual_str in meses_disponiveis:
-        default_index = meses_disponiveis.index(mes_atual_str) + 1  # +1 porque "Todos os Meses" é o primeiro
+        default_index = meses_disponiveis.index(mes_atual_str) + 1
+    elif meses_disponiveis:
+        default_index = 1  # Pega o mês mais recente com registros
 
     st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Adicionamos autocomplete="off" via HTML injetado ou parâmetro para barrar o gerenciador de senhas/e-mail
-    st.markdown("""
-        <style>
-            /* Desativa dicas de extensões de senha/email em selects */
-            input[aria-autocomplete="list"] { autocomplete: off; }
-        </style>
-    """, unsafe_allow_html=True)
 
     escolha_mes = st.selectbox(
         "📅 Mês:", 
@@ -85,7 +81,6 @@ def _render_painel(df_subset, categorias_despesas, tipo_visao):
         receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
         despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]) & (df_subset['origem'] != 'FATURA_CARTAO')]['valor'].sum()
         
-        # Soma também o cartão de crédito no consolidado se houver fatura fechada/aberta no período
         total_cartao = df_subset[df_subset['origem'] == 'FATURA_CARTAO']['valor'].sum()
         despesas += total_cartao
         saldo = receitas - despesas
@@ -97,11 +92,8 @@ def _render_painel(df_subset, categorias_despesas, tipo_visao):
 
     st.markdown("---")
 
-    # Cards de categorias de despesas
     cols_por_linha = 4
     cat_com_gastos = [c for c in categorias_despesas if df_subset[df_subset['categoria'] == c]['valor'].sum() > 0]
-    
-    # Se houver categorias fora da lista padrão (como "Não sei", etc.), inclui se tiverem valor
     outras_cats = [c for c in df_subset['categoria'].unique() if c not in categorias_despesas and c not in ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]]
     todas_exibir = cat_com_gastos + outras_cats
 
