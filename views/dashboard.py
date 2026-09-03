@@ -6,15 +6,17 @@ from sqlalchemy import text
 def render(user, conn_fin, categorias_despesas):
     st.subheader("Resumo Financeiro")
 
+    df_all = pd.DataFrame()
+    df = pd.DataFrame()
+
     try:
-        # Busca todas as transações para depuração se necessário
+        # Envolve a query em text() para o SQLAlchemy processar perfeitamente no Supabase
         df_all = pd.read_sql_query(text("SELECT * FROM transacoes"), conn_fin)
         
-        # Filtra ignorando maiúsculas/minúsculas
-        df = df_all[df_all['usuario'].astype(str).str.lower() == str(user).lower()] if not df_all.empty else pd.DataFrame()
+        if not df_all.empty and 'usuario' in df_all.columns:
+            df = df_all[df_all['usuario'].astype(str).str.lower() == str(user).lower()]
     except Exception as e:
         st.error(f"Erro ao consultar banco: {e}")
-        df = pd.DataFrame()
 
     if df.empty:
         st.warning(f"⚠️ Nenhum registro encontrado para o usuário atual ('{user}').")
