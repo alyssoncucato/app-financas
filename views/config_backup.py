@@ -75,17 +75,26 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE GERENCIAR TODAS AS CATEGORIAS DE DESPESAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria (padrão ou personalizadas).")
+    st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria.")
 
     categorias_base_sistema = [
-        "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
-        "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
+        "ALUGUEL MÃE", "CARRO", "COMBUSTÍVEL", "COMIDA CASA", "COMIDA RUA", 
+        "COMPRAS INTERNET", "EDUCAÇÃO", "FUTILIDADE", "INTERNET", "INVESTIMENTOS", 
+        "JOGOS", "LAZER", "LUZ", "MANUTENÇÃO CASA", "NÃO SEI", "PAGAMENTO FATURA", 
+        "RESERVA", "ROUPAS", "SAÚDE", "ÁGUA"
     ]
 
     cats_salvas_str = get_param(user, "categorias_personalizadas", "")
     if cats_salvas_str:
         salvas = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
-        lista_atual_cats = sorted(list(set(categorias_base_sistema + salvas)), key=lambda x: (x not in categorias_base_sistema, x))
+        # Remove duplicadas insensíveis a maiúsculas/minúsculas mantendo a lista limpa
+        vistas = set()
+        lista_atual_cats = []
+        for c in salvas:
+            c_upper = c.upper()
+            if c_upper not in vistas:
+                vistas.add(c_upper)
+                lista_atual_cats.append(c)
     else:
         lista_atual_cats = categorias_base_sistema.copy()
 
@@ -94,8 +103,8 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         nova_cat_input = st.text_input("Nome da Nova Categoria:")
         if st.form_submit_button("Criar Categoria", type="primary"):
             if nova_cat_input.strip():
-                nome_novo = nova_cat_input.strip()
-                if nome_novo.lower() not in [c.lower() for c in lista_atual_cats]:
+                nome_novo = nova_cat_input.strip().upper()
+                if nome_novo not in [c.upper() for c in lista_atual_cats]:
                     lista_atual_cats.append(nome_novo)
                     set_param(user, "categorias_personalizadas", ", ".join(lista_atual_cats))
                     st.success(f"Categoria '{nome_novo}' criada com sucesso! Atualizando...")
@@ -124,9 +133,13 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     if st.button("💾 Salvar Alterações na Lista de Categorias", type="primary"):
         novas_categorias = [str(r['Categoria']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria']) and str(r['Categoria']).strip()]
         
+        # Remove duplicadas filtrando maiúsculas/minúsculas
         novas_unicas = []
+        vistas = set()
         for c in novas_categorias:
-            if c not in novas_unicas:
+            c_upper = c.upper()
+            if c_upper not in vistas:
+                vistas.add(c_upper)
                 novas_unicas.append(c)
 
         set_param(user, "categorias_personalizadas", ", ".join(novas_unicas))
@@ -230,16 +243,4 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.divider()
     st.write("#### 💾 Backup dos Dados (Supabase)")
     try:
-        df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
-        csv_data = df_transacoes.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv", type="secondary")
-    except Exception:
-        st.info("Ainda não há transações para exportar.")
-
-    st.divider()
-    try:
-        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
-        if not df_regras.empty:
-            st.dataframe(df_regras, use_container_width=True)
-    except Exception:
-        pass
+        df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER
