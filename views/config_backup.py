@@ -60,33 +60,43 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE GERENCIAR CATEGORIAS PERSONALIZADAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    st.caption("Adicione novas categorias personalizadas (ex: Aluguel, Manutenção Casa, etc.):")
+    
+    # Mostra as categorias padrão do sistema para referência
+    categorias_padrao_lista = [
+        "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
+        "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
+    ]
+    st.markdown(f"**📌 Categorias Padrão do Sistema:**\n" + ", ".join([f"`{c}`" for c in categorias_padrao_lista]))
 
     cats_atuais_str = get_param(user, "categorias_personalizadas", "")
     lista_cats_atuais = [c.strip() for c in cats_atuais_str.split(",") if c.strip()]
 
     if lista_cats_atuais:
-        st.write(f"**Suas categorias extras cadastradas:** {', '.join(lista_cats_atuais)}")
+        st.markdown(f"**✨ Suas Categorias Personalizadas:**\n" + ", ".join([f"`{c}`" for c in lista_cats_atuais]))
     else:
-        st.info("Nenhuma categoria extra cadastrada ainda.")
+        st.info("Nenhuma categoria personalizada criada por você ainda.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     with st.form("form_nova_categoria"):
-        nova_cat_input = st.text_input("Nome da Nova Categoria:")
-        if st.form_submit_button("➕ Adicionar Categoria", type="primary"):
+        nova_cat_input = st.text_input("Adicionar Nova Categoria:")
+        if st.form_submit_button("➕ Criar Categoria", type="primary"):
             if nova_cat_input.strip():
                 nome_novo = nova_cat_input.strip()
-                if nome_novo.lower() not in [c.lower() for c in lista_cats_atuais]:
+                todas_existentes = [c.lower() for c in categorias_padrao_lista + lista_cats_atuais]
+                
+                if nome_novo.lower() not in todas_existentes:
                     lista_cats_atuais.append(nome_novo)
                     set_param(user, "categorias_personalizadas", ", ".join(lista_cats_atuais))
                     st.success(f"Categoria '{nome_novo}' criada com sucesso! Atualizando...")
                     st.rerun()
                 else:
-                    st.warning("Essa categoria já existe.")
+                    st.warning("Essa categoria já existe (nos padrões ou nas suas personalizadas).")
             else:
                 st.warning("Digite o nome da categoria.")
 
     if lista_cats_atuais:
-        cat_para_remover = st.selectbox("Selecione uma categoria extra para remover:", ["Selecione..."] + lista_cats_atuais)
+        cat_para_remover = st.selectbox("Selecione uma categoria personalizada para remover:", ["Selecione..."] + lista_cats_atuais)
         if st.button("🗑️ Remover Categoria Selecionada", type="secondary"):
             if cat_para_remover != "Selecione...":
                 lista_cats_atuais = [c for c in lista_cats_atuais if c.lower() != cat_para_remover.lower()]
