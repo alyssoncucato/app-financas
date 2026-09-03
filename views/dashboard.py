@@ -7,24 +7,28 @@ def render(user, conn_fin, categorias_despesas):
     st.subheader("Resumo Financeiro")
 
     try:
-        # Usamos LOWER(usuario) = LOWER(:u) para ignorar diferenças de maiúsculas/minúsculas no login
-        df = pd.read_sql_query(
-            text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), 
-            conn_fin, 
-            params={"u": user}
-        )
-    except Exception:
+        # Busca todas as transações para depuração se necessário
+        df_all = pd.read_sql_query(text("SELECT * FROM transacoes"), conn_fin)
+        
+        # Filtra ignorando maiúsculas/minúsculas
+        df = df_all[df_all['usuario'].astype(str).str.lower() == str(user).lower()] if not df_all.empty else pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao consultar banco: {e}")
         df = pd.DataFrame()
 
     if df.empty:
-        st.info("Nenhum registro encontrado para este usuário. Faça importações na aba 'Importar com IA'.")
+        st.warning(f"⚠️ Nenhum registro encontrado para o usuário atual ('{user}').")
+        if not df_all.empty:
+            usuarios_no_banco = df_all['usuario'].unique()
+            st.info(f"💡 Dica: Existem registros no banco associados aos seguintes usuários: {list(usuarios_no_banco)}. Verifique se você logou com o nome exato.")
+        else:
+            st.info("💡 A tabela 'transacoes' no Supabase está completamente vazia. Faça uma importação na aba 'Importar com IA'.")
         return
 
     df['data'] = pd.to_datetime(df['data'], errors='coerce')
     df['mes_ano'] = df['data'].dt.strftime('%m/%Y')
     
     meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-    
     mes_atual_str = datetime.now().strftime('%m/%Y')
 
     default_index = 0
@@ -73,7 +77,7 @@ def _render_painel(df_subset, categorias_despesas, tipo_visao):
         receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
         despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"])]['valor'].sum()
         saldo = receitas - despesas
-    else: # Consolidado
+    else:
         receitas = df_subset[df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis"])]['valor'].sum()
         despesas = df_subset[~df_subset['categoria'].isin(["Ganhos Fixos", "Ganhos Variáveis", "Ignorar"]) & (df_subset['origem'] != 'FATURA_CARTAO')]['valor'].sum()
         
