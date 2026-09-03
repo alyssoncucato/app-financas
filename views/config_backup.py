@@ -4,6 +4,7 @@ from database import engine
 from sqlalchemy import text
 from google import genai
 import json
+import time
 
 def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.subheader("⚙️ Configurações e Perfil")
@@ -69,7 +70,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         elif not descricao_aba_ia.strip():
             st.warning("Descreva o que deseja para a IA poder criar.")
         else:
-            with st.spinner("A IA está estruturando sua nova aba..."):
+            with st.spinner("A IA está estruturando sua nova aba (tentando conectar)..."):
                 try:
                     client = genai.Client(api_key=api_key)
                     prompt = f"""
@@ -88,8 +89,18 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                     }}
                     O tipo de coluna pode ser apenas: "texto", "numero" ou "status". Retorne APENAS o JSON.
                     """
-                    # CORRIGIDO para o modelo ativo gemini-3.6-flash
-                    response = client.models.generate_content(model='models/gemini-3.6-flash', contents=prompt)
+                    
+                    response = None
+                    for tentativa in range(4):
+                        try:
+                            response = client.models.generate_content(model='models/gemini-3.6-flash', contents=prompt)
+                            break
+                        except Exception as ex:
+                            if ("503" in str(ex) or "UNAVAILABLE" in str(ex)) and tentativa < 3:
+                                time.sleep(3)
+                                continue
+                            raise ex
+
                     texto_resp = response.text.strip()
                     if texto_resp.startswith("```json"):
                         texto_resp = texto_resp[7:-3].strip()
