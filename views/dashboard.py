@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
 def render(user, conn_fin, categorias_despesas):
     st.subheader("Resumo Financeiro")
@@ -14,10 +15,24 @@ def render(user, conn_fin, categorias_despesas):
             if not df_subset.empty:
                 df_subset['data_dt'] = pd.to_datetime(df_subset['data'], errors='coerce')
                 df_subset['mes_ano'] = df_subset['data_dt'].dt.strftime('%m/%Y')
-                meses = sorted([m for m in df_subset['mes_ano'].dropna().unique()], reverse=True)
                 
+                # Ordena os meses cronologicamente de forma crescente (ex: 12/2025, 01/2026, ..., 08/2026)
+                meses = sorted([m for m in df_subset['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'))
+                
+                # Define o índice padrão para selecionar o último mês com lançamentos (o final da lista ordenada)
+                default_index = len(meses) if meses else 0  # +1 considerando "Todos os Meses" na primeira posição
+
+                # Lista completa de opções com "Todos os Meses" no início
+                opcoes_mes = ["Todos os Meses"] + meses
+
                 # Chave garantidamente única baseada no sufixo da aba e no total de linhas
-                mes_sel = st.selectbox("📅 Mês:", ["Todos os Meses"] + meses, key=f"sel_mes_{key_suffix}_{df_subset.shape[0]}")
+                mes_sel = st.selectbox(
+                    "📅 Mês:", 
+                    opcoes_mes, 
+                    index=default_index, 
+                    key=f"sel_mes_{key_suffix}_{df_subset.shape[0]}"
+                )
+                
                 df_v = df_subset if mes_sel == "Todos os Meses" else df_subset[df_subset['mes_ano'] == mes_sel]
 
                 ganhos = df_v[df_v['categoria'].isin(['Ganhos Fixos', 'Ganhos Variáveis'])]['valor'].sum()
