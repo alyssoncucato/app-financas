@@ -3,10 +3,9 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
 
-def render(user, conn_fin, categorias_despesas):
+def render(user, conn_fin, categorias_despesas, categorias_entradas):
     st.subheader("📊 Dashboard Financeiro Estruturado")
     
-    # Correção para o Postgres: usando parâmetro nomeado com text()
     try:
         query = text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)")
         df = pd.read_sql_query(query, conn_fin, params={"u": user})
@@ -67,9 +66,9 @@ def render(user, conn_fin, categorias_despesas):
         st.warning(f"Nenhum registro encontrado para {tipo_visao} em {titulo_periodo}.")
         return
 
-    # --- CÁLCULOS ---
+    # --- CÁLCULOS USANDO AS ENTRADAS PERSONALIZADAS ---
     if "Conta Corrente" in tipo_visao or "Visão Geral" in tipo_visao:
-        receitas = df_final[df_final['categoria'].isin(['Ganhos Fixos', 'Ganhos Variáveis'])]['valor'].sum()
+        receitas = df_final[df_final['categoria'].isin(categorias_entradas)]['valor'].sum()
     else:
         receitas = 0.0
 
