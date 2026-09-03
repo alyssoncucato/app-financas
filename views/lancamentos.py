@@ -2,135 +2,118 @@ import streamlit as st
 import pandas as pd
 from database import engine
 from sqlalchemy import text
+from datetime import datetime
 
 def render(user, conn_fin, c_fin, todas_categorias):
-    st.subheader("📋 Lançamentos e Edição")
+    st.subheader("📋 Lançamentos e Edição por Mês")
 
-    # --- BOTÃO GLOBAL DE LIMPEZA DIRETO NO ENGINE ---
-    with st.expander("⚙️ Opções Avançadas / Limpeza de Dados", expanded=False):
-        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos salvos para o usuário atual permanentemente.")
+    # Botão de limpeza avançada escondido em expander para evitar cliques acidentais
+    with st.expander("⚠️ Opções Avançadas / Limpeza de Dados"):
+        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos de extratos e faturas salvos permanentemente.")
         if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
             try:
                 with engine.connect() as connection:
                     with connection.begin():
-                        connection.execute(
-                            text("DELETE FROM transacoes WHERE usuario = :usuario"),
-                            {"usuario": user}
-                        )
-                st.success("Todos os lançamentos foram apagados com sucesso do Supabase!")
+                        connection.execute(text("DELETE FROM transacoes WHERE usuario = :u"), {"u": user})
+                st.success("Todos os lançamentos foram apagados com sucesso!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao apagar registros: {e}")
+                st.error(f"Erro ao apagar: {e}")
 
-    st.divider()
+    # Carrega todos os registros do usuário
+    df = pd.read_sql_query("SELECT * FROM transacoes WHERE usuario = ?", conn_fin, params=(user,))
 
-    # Criamos sub-abas para separar visualmente Conta Corrente e Cartão de Crédito
-    tab_cc, tab_cartao, tab_todos = st.tabs(["🏦 Conta Corrente / Pix", "💳 Cartão de Crédito", "📁 Todos os Registros"])
-
-    # --- ABA 1: CONTA CORRENTE ---
-    with tab_cc:
-        st.markdown("### Lançamentos da Conta Corrente")
-        df_cc = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? AND origem = 'EXTRATO_CONTA' ORDER BY data DESC", conn_fin, params=(user,))
+    if not df.empty:
+        df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
+        df['mes_ano'] = df['data_dt'].dt.strftime('%m/%Y')
         
-        if not df_cc.empty:
-            df_ed_cc = st.data_editor(
-                df_cc, 
-                column_config={
-                    "id": None, 
-                    "origem": None, 
-                    "status_fatura": None, 
-                    "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
-                }, 
-                hide_index=True, 
-                width="stretch", 
-                key="editor_cc"
-            )
-            
-            if st.button("💾 Salvar Edições (Conta Corrente)", type="primary", key="btn_cc"):
-                for _, r in df_ed_cc.iterrows():
-                    if pd.notna(r.get('id')):
-                        c_fin.execute(
-                            "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ? WHERE id = ? AND usuario = ?", 
-                            (r['data'], r['descricao'], r['valor'], r['categoria'], int(r['id']), user)
-                        )
-                        if r['descricao'] and r['categoria'] != "Ignorar":
-                            c_fin.execute(
-                                "INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", 
-                                (user, str(r['descricao']).strip(), r['categoria'])
-                            )
-                
-                st.success("Alterações salvas com sucesso!")
-                st.rerun()
-        else:
-            st.info("Nenhum lançamento de extrato bancário encontrado.")
-
-    # --- ABA 2: CARTÃO DE CRÉDITO ---
-    with tab_cartao:
-        st.markdown("### Lançamentos do Cartão de Crédito")
-        df_cartao = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? AND origem = 'FATURA_CARTAO' ORDER BY data DESC", conn_fin, params=(user,))
+        meses = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
         
-        if not df_cartao.empty:
-            df_ed_cartao = st.data_editor(
-                df_cartao, 
-                column_config={
-                    "id": None, 
-                    "origem": None, 
-                    "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
-                }, 
-                hide_index=True, 
-                width="stretch", 
-                key="editor_cartao"
-            )
-            
-            if st.button("💾 Salvar Edições (Cartão)", type="primary", key="btn_cartao"):
-                for _, r in df_ed_cartao.iterrows():
-                    if pd.notna(r.get('id')):
-                        c_fin.execute(
-                            "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ?, status_fatura = ? WHERE id = ? AND usuario = ?", 
-                            (r['data'], r['descricao'], r['valor'], r['categoria'], r['status_fatura'], int(r['id']), user)
-                        )
-                        if r['descricao'] and r['categoria'] != "Ignorar":
-                            c_fin.execute(
-                                "INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", 
-                                (user, str(r['descricao']).strip(), r['categoria'])
-                            )
-                
-                st.success("Alterações salvas com sucesso!")
-                st.rerun()
-        else:
-            st.info("Nenhum lançamento de fatura de cartão encontrado.")
+        if meses:
+            # Seletor de mês principal para os lançamentos
+            mes_escolhido = st.selectbox("📅 Filtrar Lançamentos do Mês:", meses, key="sel_mes_lancamentos")
+            df_filtrado = df[df['mes_ano'] == mes_escolhido]
 
-    # --- ABA 3: TODOS OS REGISTROS (VISÃO GERAL) ---
-    with tab_todos:
-        st.markdown("### Visão Completa Consolidada")
-        df_all = pd.read_sql_query("SELECT id, data, descricao, valor, categoria, status_fatura, origem FROM transacoes WHERE usuario = ? ORDER BY data DESC", conn_fin, params=(user,))
-        
-        if not df_all.empty:
-            df_ed = st.data_editor(
-                df_all, 
-                column_config={
-                    "id": None, 
-                    "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias)
-                }, 
-                hide_index=True, 
-                width="stretch", 
-                key="editor_todos"
-            )
-            
-            if st.button("💾 Salvar Edições (Todos)", type="primary", key="btn_todos"):
-                for _, r in df_ed.iterrows():
-                    if pd.notna(r.get('id')):
-                        c_fin.execute(
-                            "UPDATE transacoes SET data = ?, descricao = ?, valor = ?, categoria = ?, status_fatura = ? WHERE id = ? AND usuario = ?", 
-                            (r['data'], r['descricao'], r['valor'], r['categoria'], r['status_fatura'], int(r['id']), user)
-                        )
-                        if r['descricao'] and r['categoria'] != "Ignorar":
-                            c_fin.execute(
-                                "INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) VALUES (?, ?, ?) ON CONFLICT(usuario, termo_chave) DO UPDATE SET categoria_destino = excluded.categoria_destino", 
-                                (user, str(r['descricao']).strip(), r['categoria'])
-                            )
-                
-                st.success("Salvo!")
-                st.rerun()
+            # Sub-abas visuais bem limpas para o mês escolhido
+            tab_cc, tab_cartao, tab_todos = st.tabs(["🏦 Conta Corrente / Pix", "💳 Cartão de Crédito", "📁 Todos do Mês"])
+
+            def render_editor(df_sub, key_sufixo):
+                if not df_sub.empty:
+                    df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
+                    
+                    df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
+
+                    editor_result = st.data_editor(
+                        df_editavel,
+                        column_config={
+                            "id": None, # Esconde o ID
+                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
+                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
+                            "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
+                            "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias, required=True),
+                            "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
+                            "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
+                        },
+                        hide_index=True,
+                        num_rows="fixed",
+                        key=f"editor_lanc_{key_sufixo}_{mes_escolhido.replace('/', '_')}"
+                    )
+
+                    if st.button(f"💾 Salvar Alterações ({key_sufixo.upper()})", type="primary", key=f"btn_salvar_{key_sufixo}_{mes_escolhido.replace('/', '_')}"):
+                        try:
+                            with engine.connect() as connection:
+                                with connection.begin():
+                                    for _, row in editor_result.iterrows():
+                                        connection.execute(
+                                            text("""
+                                                UPDATE transacoes 
+                                                SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig 
+                                                WHERE id = :id
+                                            """),
+                                            {
+                                                "d": str(row['data']),
+                                                "desc": row['descricao'],
+                                                "v": float(row['valor']),
+                                                "cat": row['categoria'],
+                                                "sf": row['status_fatura'],
+                                                "orig": row['origem'],
+                                                "id": int(row['id'])
+                                            }
+                                        )
+                            
+                            # Atualiza também a tabela de regras caso o usuário tenha categorizado manualmente
+                            for _, row in editor_result.iterrows():
+                                if row['categoria'] not in ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar", "Não sei"]:
+                                    termo_limpo = str(row['descricao']).strip().upper()
+                                    if len(termo_limpo) >= 3:
+                                        connection.execute(
+                                            text("""
+                                                INSERT INTO regras_categorias (usuario, termo_chave, categoria_destino) 
+                                                VALUES (:u, :t, :c)
+                                                ON CONFLICT DO NOTHING
+                                            """),
+                                            {"u": user, "t": termo_limpo, "c": row['categoria']}
+                                        )
+
+                            st.success("Alterações salvas com sucesso!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao salvar alterações: {e}")
+                else:
+                    st.info(f"Nenhum registro encontrado para este filtro no mês de {mes_escolhido}.")
+
+            with tab_cc:
+                st.markdown(f"#### Movimentações de Conta Corrente - {mes_escolhido}")
+                render_editor(df_filtrado[df_filtrado['origem'] == 'EXTRATO_CONTA'], "cc")
+
+            with tab_cartao:
+                st.markdown(f"#### Faturas de Cartão de Crédito - {mes_escolhido}")
+                render_editor(df_filtrado[df_filtrado['origem'] == 'FATURA_CARTAO'], "cartao")
+
+            with tab_todos:
+                st.markdown(f"#### Todos os Registros - {mes_escolhido}")
+                render_editor(df_filtrado, "todos")
         else:
-            st.info("Nenhum lançamento cadastrado.")
+            st.info("Nenhum mês válido encontrado.")
+    else:
+        st.info("Nenhum lançamento cadastrado.")
