@@ -15,25 +15,29 @@ def render(user, conn_fin, categorias_despesas):
     except Exception:
         df = pd.DataFrame()
 
+    # Se realmente não houver absolutamente nada no banco para este usuário:
     if df.empty:
-        st.info("Nenhum registro encontrado para este usuário. Faça importações na aba 'Importar com IA'.")
+        st.warning(f"⚠️ Nenhum registro encontrado para o usuário '{user}'. Verifique se você realizou importações na aba 'Importar com IA' ou se o login está correto.")
         return
 
     df['data'] = pd.to_datetime(df['data'], errors='coerce')
     df['mes_ano'] = df['data'].dt.strftime('%m/%Y')
     
+    # Pega todos os meses disponíveis no banco
     meses_disponiveis = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
     
     mes_atual_str = datetime.now().strftime('%m/%Y')
 
+    # Define o índice padrão: se o mês atual existir, usa ele. Se não, usa o primeiro mês com dados (ex: agosto)
     default_index = 0
     if mes_atual_str in meses_disponiveis:
         default_index = meses_disponiveis.index(mes_atual_str) + 1
     elif meses_disponiveis:
-        default_index = 1
+        default_index = 1  # Seleciona o mês mais recente com dados
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # O seletor de meses SEMPRE aparece se houver dados
     escolha_mes = st.selectbox(
         "📅 Mês:", 
         ["Todos os Meses"] + meses_disponiveis, 
@@ -61,7 +65,7 @@ def render(user, conn_fin, categorias_despesas):
 
 def _render_painel(df_subset, categorias_despesas, tipo_visao):
     if df_subset.empty:
-        st.warning(f"Nenhum lançamento encontrado para esta visão no período selecionado.")
+        st.info(f"Nenhum lançamento encontrado para esta visão no período selecionado.")
         return
 
     if tipo_visao == "Cartão de Crédito":
