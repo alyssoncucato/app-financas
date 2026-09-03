@@ -1,11 +1,18 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from sqlalchemy import text
 
 def render(user, conn_fin, categorias_despesas):
     st.subheader("📊 Dashboard Financeiro Estruturado")
     
-    df = pd.read_sql_query("SELECT * FROM transacoes WHERE usuario = ?", conn_fin, params=(user,))
+    # Correção para o Postgres: usando parâmetro nomeado com text()
+    try:
+        query = text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)")
+        df = pd.read_sql_query(query, conn_fin, params={"u": user})
+    except Exception as e:
+        st.error(f"Erro ao carregar transações: {e}")
+        return
     
     if df.empty:
         st.info("Nenhum lançamento encontrado. Importe extratos ou faturas para visualizar o dashboard.")
@@ -121,30 +128,21 @@ def render(user, conn_fin, categorias_despesas):
         st.info("Nenhuma despesa detalhada para este filtro.")
         return
 
-    # Padroniza a descrição para agrupar estabelecimentos parecidos
     df_desp['estabelecimento'] = df_desp['descricao'].str.strip().str.upper()
-
-    # Itera sobre cada categoria existente nos dados
     categorias_presentes = sorted(df_desp['categoria'].unique())
 
     for cat in categorias_presentes:
         df_cat_itens = df_desp[df_desp['categoria'] == cat]
         total_cat = df_cat_itens['valor'].sum()
 
-        # Nível 1: Categoria (Expander principal)
         with st.expander(f"📁 **{cat}** — Total: R$ {total_cat:,.2f} ({len(df_cat_itens)} itens)"):
-            
-            # Agrupa por estabelecimento dentro da categoria
             estabelecimentos = sorted(df_cat_itens['estabelecimento'].unique())
             
             for estab in estabelecimentos:
                 df_estab_itens = df_cat_itens[df_cat_itens['estabelecimento'] == estab]
                 total_estab = df_estab_itens['valor'].sum()
 
-                # Nível 2: Estabelecimento (Sub-expander)
                 with st.expander(f"🔹 **{estab}** — Subtotal: R$ {total_estab:,.2f} ({len(df_estab_itens)}x)"):
-                    
-                    # Nível 3: Lançamentos individuais (Data e Valor)
                     for _, row in df_estab_itens.iterrows():
                         data_formatada = pd.to_datetime(row['data']).strftime('%d/%m/%Y') if pd.notna(row['data']) else "Data não inf."
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Valor:** `R$ {row['valor']:,.2f}` | *Origem:* {row['origem']}")
