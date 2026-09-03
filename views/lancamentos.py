@@ -43,34 +43,30 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                    # Identifica visualmente o tipo
-                    def identifica_tipo(cat):
+                    # Define o Tipo inicial baseado na categoria atual
+                    def define_tipo(cat):
                         if cat in categorias_entradas:
-                            return "🟢 ENTRADA"
-                        elif cat == "Ignorar":
-                            return "⚪ IGNORAR"
+                            return "ENTRADA"
                         else:
-                            return "🔴 SAÍDA"
+                            return "SAÍDA"
 
-                    df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
+                    df_editavel['Tipo'] = df_editavel['categoria'].apply(define_tipo)
 
-                    # Dividimos em duas colunas separadas para a tabela: uma para selecionar despesas e outra para entradas.
-                    # Assim, quem é saída usa a coluna de despesas, e quem é entrada usa a coluna de entradas!
-                    df_editavel['Categoria Despesa'] = df_editavel.apply(lambda r: r['categoria'] if r['categoria'] in categorias_despesas or r['categoria'] == "Ignorar" else categorias_despesas[0], axis=1)
-                    df_editavel['Categoria Entrada'] = df_editavel.apply(lambda r: r['categoria'] if r['categoria'] in categorias_entradas else categorias_entradas[0], axis=1)
+                    # Reorganiza as colunas: Data | Descrição | Tipo | Valor | Categoria única | Status | Origem
+                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
-                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'Categoria Despesa', 'Categoria Entrada', 'status_fatura', 'origem']]
+                    # Opções unificadas para a coluna de Categoria
+                    todas_opcoes_cat = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
 
                     editor_result = st.data_editor(
                         df_editavel,
                         column_config={
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
-                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="medium", required=True),
-                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
+                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
+                            "Tipo": st.column_config.SelectboxColumn("Tipo", options=["SAÍDA", "ENTRADA"], required=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
-                            "Categoria Despesa": st.column_config.SelectboxColumn("Cat. Despesa (Se Saída)", options=list(set(categorias_despesas + ["Ignorar"])), required=True),
-                            "Categoria Entrada": st.column_config.SelectboxColumn("Cat. Entrada (Se Entrada)", options=list(set(categorias_entradas)), required=True),
+                            "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes_cat, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
                         },
@@ -84,12 +80,14 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
-                                        # Define qual categoria salvar com base no tipo da linha original
-                                        tipo_atual = row['Tipo']
-                                        if "ENTRADA" in tipo_atual:
-                                            cat_final = row['Categoria Entrada']
-                                        else:
-                                            cat_final = row['Categoria Despesa']
+                                        cat_escolhida = row['categoria']
+                                        tipo_escolhido = row['Tipo']
+
+                                        # Validação de coerência: se marcou ENTRADA, garante que seja categoria de entrada (ou ajusta caso tenha misturado)
+                                        if tipo_escolhido == "ENTRADA" and cat_escolhida not in categorias_entradas:
+                                            cat_escolhida = categorias_entradas[0] # Fallback seguro
+                                        elif tipo_escolhido == "SAÍDA" and cat_escolhida in categorias_entradas:
+                                            cat_escolhida = categorias_despesas[0] # Fallback seguro
 
                                         connection.execute(
                                             text("""
@@ -101,7 +99,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 "d": str(row['data']),
                                                 "desc": row['descricao'],
                                                 "v": float(row['valor']),
-                                                "cat": cat_final,
+                                                "cat": cat_escolhida,
                                                 "sf": row['status_fatura'],
                                                 "orig": row['origem'],
                                                 "id": int(row['id'])
@@ -109,10 +107,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                         )
                             
                             for _, row in editor_result.iterrows():
-                                tipo_atual = row['Tipo']
-                                cat_final = row['Categoria Entrada'] if "ENTRADA" in tipo_atual else row['Categoria Despesa']
-                                
-                                if cat_final not in categorias_entradas and cat_final not in ["Ignorar", "Não sei"]:
+                                if row['categoria'] not in categorias_entradas and row['categoria'] not in ["Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
                                     if len(termo_limpo) >= 3:
                                         connection.execute(
@@ -121,7 +116,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 VALUES (:u, :t, :c)
                                                 ON CONFLICT DO NOTHING
                                             """),
-                                            {"u": user, "t": termo_limpo, "c": cat_final}
+                                            {"u": user, "t": termo_limpo, "c": row['categoria']}
                                         )
 
                             st.success("Alterações salvas com sucesso!")
