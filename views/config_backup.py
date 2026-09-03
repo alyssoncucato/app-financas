@@ -243,4 +243,16 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.divider()
     st.write("#### 💾 Backup dos Dados (Supabase)")
     try:
-        df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER
+        df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
+        csv_data = df_transacoes.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv", type="secondary")
+    except Exception:
+        st.info("Ainda não há transações para exportar.")
+
+    st.divider()
+    try:
+        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
+        if not df_regras.empty:
+            st.dataframe(df_regras, use_container_width=True)
+    except Exception:
+        pass
