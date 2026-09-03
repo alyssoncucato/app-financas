@@ -8,7 +8,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
     st.subheader("📋 Lançamentos e Edição por Mês")
 
     with st.expander("⚠️ Opções Avançadas / Limpeza de Dados"):
-        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos de extratos e faturas salvos permanentemente.")
+        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos salvos permanentemente.")
         if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
             try:
                 with engine.connect() as connection:
@@ -34,30 +34,22 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
         
         if meses:
             mes_escolhido = st.selectbox("📅 Filtrar Lançamentos do Mês:", meses, key="sel_mes_lancamentos")
-            df_filtrado = df[df['mes_ano'] == mes_escolhido]
+            df_mes = df[df['mes_ano'] == mes_escolhido]
 
-            tab_cc, tab_cartao, tab_todos = st.tabs(["🏦 Conta Corrente / Pix", "💳 Cartão de Crédito", "📁 Todos do Mês"])
+            # Separa estritamente entre Entradas e Saídas com base nas categorias cadastradas
+            df_entradas = df_mes[df_mes['categoria'].isin(categorias_entradas)].copy()
+            df_saidas = df_mes[~df_mes['categoria'].isin(categorias_entradas)].copy()
 
-            def render_editor(df_sub, key_sufixo):
+            tab_saidas, tab_entradas, tab_todos = st.tabs([
+                f"🔴 Saídas / Despesas ({len(df_saidas)})", 
+                f"🟢 Entradas / Receitas ({len(df_entradas)})", 
+                f"📁 Todos do Mês ({len(df_mes)})"
+            ])
+
+            def render_editor(df_sub, key_sufixo, opcoes_disponiveis):
                 if not df_sub.empty:
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
-
-                    # Identifica visualmente se é entrada ou saída baseado nas listas personalizadas
-                    def identifica_tipo(cat):
-                        if cat in categorias_entradas:
-                            return "🟢 ENTRADA"
-                        elif cat == "Ignorar":
-                            return "⚪ IGNORAR"
-                        else:
-                            return "🔴 SAÍDA"
-
-                    df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
-
-                    # Reorganiza as colunas para o Tipo ficar visível logo após a descrição
-                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
-
-                    todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
 
                     editor_result = st.data_editor(
                         df_editavel,
@@ -65,9 +57,9 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
-                            "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
+                            # Exibe estritamente apenas as opções permitidas para este contexto
+                            "categoria": st.column_config.SelectboxColumn("Categoria", options=opcoes_disponiveis, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
                         },
@@ -116,19 +108,21 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         except Exception as e:
                             st.error(f"Erro ao salvar alterações: {e}")
                 else:
-                    st.info(f"Nenhum registro encontrado para este filtro no mês de {mes_escolhido}.")
+                    st.info(f"Nenhum registro encontrado nesta aba para o mês de {mes_escolhido}.")
 
-            with tab_cc:
-                st.markdown(f"#### Movimentações de Conta Corrente - {mes_escolhido}")
-                render_editor(df_filtrado[df_filtrado['origem'] == 'EXTRATO_CONTA'], "cc")
+            with tab_saidas:
+                st.markdown(f"#### 📉 Saídas e Despesas - {mes_escolhido}")
+                st.caption("Nesta aba aparecem apenas os lançamentos de gastos. O seletor de categorias exibe apenas as despesas.")
+                render_editor(df_saidas, "saidas", list(set(categorias_despesas + ["Ignorar"])))
 
-            with tab_cartao:
-                st.markdown(f"#### Faturas de Cartão de Crédito - {mes_escolhido}")
-                render_editor(df_filtrado[df_filtrado['origem'] == 'FATURA_CARTAO'], "cartao")
+            with tab_entradas:
+                st.markdown(f"#### 📈 Entradas e Receitas - {mes_escolhido}")
+                st.caption("Nesta aba aparecem apenas os recebimentos. O seletor exibe apenas as categorias de entrada.")
+                render_editor(df_entradas, "entradas", list(set(categorias_entradas)))
 
             with tab_todos:
-                st.markdown(f"#### Todos os Registros - {mes_escolhido}")
-                render_editor(df_filtrado, "todos")
+                st.markdown(f"#### 📁 Todos os Registros - {mes_escolhido}")
+                render_editor(df_mes, "todos", list(set(categorias_despesas + categorias_entradas + ["Ignorar"])))
         else:
             st.info("Nenhum mês válido encontrado.")
     else:
