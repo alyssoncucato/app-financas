@@ -4,7 +4,7 @@ from database import engine
 from sqlalchemy import text
 from datetime import datetime
 
-def render(user, conn_fin, c_fin, todas_categorias):
+def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
     st.subheader("📋 Lançamentos e Edição por Mês")
 
     with st.expander("⚠️ Opções Avançadas / Limpeza de Dados"):
@@ -43,19 +43,8 @@ def render(user, conn_fin, c_fin, todas_categorias):
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                    # Identifica visualmente se é entrada ou saída para facilitar a leitura
-                    def identifica_tipo(cat):
-                        if cat in ["Ganhos Fixos", "Ganhos Variáveis"] or "GANHO" in str(cat).upper() or "SALÁRIO" in str(cat).upper():
-                            return "🟢 ENTRADA"
-                        elif cat == "Ignorar":
-                            return "⚪ IGNORAR"
-                        else:
-                            return "🔴 SAÍDA"
-
-                    df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
-
-                    # Reorganiza as colunas para o Tipo ficar logo após a descrição
-                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
+                    # Define as opções globais permitidas para o editor do Streamlit
+                    todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
 
                     editor_result = st.data_editor(
                         df_editavel,
@@ -63,9 +52,9 @@ def render(user, conn_fin, c_fin, todas_categorias):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
-                            "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias, required=True),
+                            # Mostra as categorias dinamicamente
+                            "categoria": st.column_config.SelectboxColumn("Categoria / Tipo", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
                         },
@@ -97,7 +86,7 @@ def render(user, conn_fin, c_fin, todas_categorias):
                                         )
                             
                             for _, row in editor_result.iterrows():
-                                if row['categoria'] not in ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar", "Não sei"]:
+                                if row['categoria'] not in categorias_entradas and row['categoria'] not in ["Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
                                     if len(termo_limpo) >= 3:
                                         connection.execute(
