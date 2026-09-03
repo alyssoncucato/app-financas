@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 # Lê a URL do banco dos segredos do Streamlit
 DATABASE_URL = st.secrets.get("DATABASE_URL", "")
@@ -9,17 +10,16 @@ DATABASE_URL = st.secrets.get("DATABASE_URL", "")
 if not DATABASE_URL:
     st.error("Erro crítico: A variável DATABASE_URL não foi encontrada nos Secrets do Streamlit.")
 
-# Garante que a URL use a porta 6579 (Transaction Mode) para evitar esgotar conexões
+# Garante que a URL use a porta 6543 (Transaction Mode) do Supabase
 if "pooler.supabase.com" in DATABASE_URL and ":5432" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace(":5432", ":6579")
+    DATABASE_URL = DATABASE_URL.replace(":5432", ":6543")
 
-# Engine configurada com pool otimizado para transações rápidas
+# NullPool faz com que cada requisição abra e feche a conexão instantaneamente, 
+# evitando qualquer travamento de limite de pool no Supabase.
 engine = create_engine(
     DATABASE_URL, 
-    pool_pre_ping=True, 
-    pool_size=2, 
-    max_overflow=1,
-    pool_recycle=60
+    poolclass=NullPool,
+    pool_pre_ping=True
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
