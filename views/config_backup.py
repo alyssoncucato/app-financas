@@ -59,9 +59,9 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE CRIAÇÃO DE ABAS VIA IA ---
     st.write("#### 🤖 Criar Nova Aba Personalizada com Inteligência Artificial")
-    st.caption("Descreva o que você quer controlar (ex: 'Quero uma aba para planejar meu casamento com fornecedor, valor e status de pagamento'). A IA criará a aba para você[cite: 5]:")
+    st.caption("Descreva o que você quer controlar. A IA criará a aba para você:")
 
-    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de gastos do meu setup do PC com nome da peça, loja, valor e status...")
+    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de recebimentos do patrão com mês, tipo, valor e status...")
 
     if st.button("✨ Gerar e Criar Aba com IA", type="primary"):
         if not api_key or api_key == "SUA_CHAVE_AQUI":
@@ -69,7 +69,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
         elif not descricao_aba_ia.strip():
             st.warning("Descreva o que deseja para a IA poder criar.")
         else:
-            with st.spinner("A IA está estruturando sua nova aba...[cite: 5]"):
+            with st.spinner("A IA está estruturando sua nova aba..."):
                 try:
                     client = genai.Client(api_key=api_key)
                     prompt = f"""
@@ -88,7 +88,8 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                     }}
                     O tipo de coluna pode ser apenas: "texto", "numero" ou "status". Retorne APENAS o JSON.
                     """
-                    response = client.models.generate_content(model='models/gemini-2.5-flash', contents=prompt)
+                    # CORRIGIDO para o modelo ativo gemini-3.6-flash
+                    response = client.models.generate_content(model='models/gemini-3.6-flash', contents=prompt)
                     texto_resp = response.text.strip()
                     if texto_resp.startswith("```json"):
                         texto_resp = texto_resp[7:-3].strip()
