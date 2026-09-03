@@ -43,7 +43,20 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                    # Define as opções globais permitidas para o editor do Streamlit
+                    # Identifica visualmente se é entrada ou saída baseado nas listas personalizadas
+                    def identifica_tipo(cat):
+                        if cat in categorias_entradas:
+                            return "🟢 ENTRADA"
+                        elif cat == "Ignorar":
+                            return "⚪ IGNORAR"
+                        else:
+                            return "🔴 SAÍDA"
+
+                    df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
+
+                    # Reorganiza as colunas para o Tipo ficar visível logo após a descrição
+                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
+
                     todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
 
                     editor_result = st.data_editor(
@@ -52,9 +65,9 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
+                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
-                            # Mostra as categorias dinamicamente
-                            "categoria": st.column_config.SelectboxColumn("Categoria / Tipo", options=todas_opcoes, required=True),
+                            "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
                         },
