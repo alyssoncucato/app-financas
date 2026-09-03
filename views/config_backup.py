@@ -11,10 +11,17 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE EDITAR PERFIL ---
     st.write("#### 👤 Meu Perfil")
-    user_data = c_fin.execute(f"SELECT email, senha, foto FROM usuarios WHERE username = '{user}'").fetchone()
-    email_atual = user_data[0] if user_data and user_data[0] else ""
-    senha_atual = user_data[1] if user_data and user_data[1] else ""
-    foto_atual = user_data[2] if user_data and user_data[2] else ""
+    try:
+        with engine.connect() as conn:
+            res_user = conn.execute(
+                text("SELECT email, senha, foto FROM usuarios WHERE LOWER(username) = LOWER(:u)"),
+                {"u": user}
+            ).fetchone()
+        email_atual = res_user[0] if res_user and res_user[0] else ""
+        senha_atual = res_user[1] if res_user and res_user[1] else ""
+        foto_atual = res_user[2] if res_user and res_user[2] else ""
+    except Exception:
+        email_atual, senha_atual, foto_atual = "", "", ""
 
     col_f1, col_f2 = st.columns([1, 4])
     with col_f1:
@@ -31,9 +38,17 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
             
             if st.form_submit_button("💾 Salvar Alterações de Perfil", type="primary"):
                 s_final = nova_senha.strip() if nova_senha.strip() else senha_atual
-                c_fin.execute(f"UPDATE usuarios SET email = '{novo_email.strip()}', senha = '{s_final}', foto = '{nova_foto_url.strip()}' WHERE username = '{user}'")
-                st.success("Perfil atualizado com sucesso!")
-                st.rerun()
+                try:
+                    with engine.connect() as connection:
+                        with connection.begin():
+                            connection.execute(
+                                text("UPDATE usuarios SET email = :e, senha = :s, foto = :f WHERE LOWER(username) = LOWER(:u)"),
+                                {"e": novo_email.strip(), "s": s_final, "f": nova_foto_url.strip(), "u": user}
+                            )
+                    st.success("Perfil atualizado com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao atualizar perfil: {e}")
 
     st.divider()
 
@@ -62,22 +77,18 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
     st.caption("Aqui você tem controle total: adicione, renomeie ou exclua qualquer categoria (padrão ou personalizadas).")
 
-    # Lista base padrão completa do sistema
     categorias_base_sistema = [
         "Casa", "Alimentação Rua", "Alimentação Casa", "Carro", "Gasolina",
         "Saúde", "Educação", "Lazer", "Investimento", "Dívidas", "Compras", "Não sei"
     ]
 
-    # Recupera do banco as salvas e garante a fusão com a base caso venha faltando alguma
     cats_salvas_str = get_param(user, "categorias_personalizadas", "")
     if cats_salvas_str:
         salvas = [c.strip() for c in cats_salvas_str.split(",") if c.strip()]
-        # Garante que as padrão apareçam caso não tenham sido explicitamente apagadas pelo usuário
         lista_atual_cats = sorted(list(set(categorias_base_sistema + salvas)), key=lambda x: (x not in categorias_base_sistema, x))
     else:
         lista_atual_cats = categorias_base_sistema.copy()
 
-    # Formulário para Adicionar Nova Categoria
     with st.form("form_nova_categoria"):
         st.markdown("##### ➕ Adicionar Nova Categoria")
         nova_cat_input = st.text_input("Nome da Nova Categoria:")
@@ -113,7 +124,6 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     if st.button("💾 Salvar Alterações na Lista de Categorias", type="primary"):
         novas_categorias = [str(r['Categoria']).strip() for _, r in ed_cats.iterrows() if pd.notna(r['Categoria']) and str(r['Categoria']).strip()]
         
-        # Remove duplicadas mantendo a ordem
         novas_unicas = []
         for c in novas_categorias:
             if c not in novas_unicas:
@@ -193,7 +203,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     try:
         with engine.connect() as conn:
             df_minhas_abas = pd.read_sql_query(
-                text("SELECT id, nome_aba, icone FROM usuario_abas_ia WHERE usuario = :u"),
+                text("SELECT id, nome_aba, icone FROM usuario_abas_ia WHERE LOWER(usuario) = LOWER(:u)"),
                 conn,
                 params={"u": user}
             )
@@ -211,7 +221,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                     try:
                         with engine.connect() as connection:
                             with connection.begin():
-                                connection.execute(text("DELETE FROM usuario_abas_ia WHERE id = :id AND usuario = :u"), {"id": int(r['id']), "u": user})
+                                connection.execute(text("DELETE FROM usuario_abas_ia WHERE id = :id AND LOWER(usuario) = LOWER(:u)"), {"id": int(r['id']), "u": user})
                         st.success("Aba excluída!")
                         st.rerun()
                     except Exception as e:
@@ -220,13 +230,12 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.divider()
     st.write("#### 💾 Backup dos Dados (Supabase)")
     try:
-        df_transacoes = pd.read_sql_query(f"SELECT * FROM transacoes WHERE usuario = '{user}'", conn_fin)
+        df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
         csv_data = df_transacoes.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv", type="secondary")
     except Exception:
         st.info("Ainda não há transações para exportar.")
 
     st.divider()
-    df_regras = pd.read_sql_query(f"SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE usuario = '{user}'", conn_fin)
-    if not df_regras.empty:
-        st.dataframe(df_regras, use_container_width=True)
+    try:
+        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria

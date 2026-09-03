@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 from sqlalchemy import text
-from database import inicializar_bancos, engine, conn_fin, c_fin, conn_proj, c_proj, get_param, set_param
+from database import inicializar_bancos, engine, get_param, set_param
 from views import dashboard, importacao, lancamentos, dividas_casa, projetos, config_backup, metas
 import pandas as pd
 
@@ -29,7 +29,7 @@ if st.session_state.usuario_logado is None:
                     usr_pesquisa = u_input.strip().lower()
                     try:
                         with engine.connect() as connection:
-                            res = connection.execute(text("SELECT senha FROM usuarios WHERE username = :usr"), {"usr": usr_pesquisa}).fetchone()
+                            res = connection.execute(text("SELECT senha FROM usuarios WHERE LOWER(username) = LOWER(:usr)"), {"usr": usr_pesquisa}).fetchone()
                             if res and str(res[0]) == str(s_input):
                                 st.session_state.usuario_logado = usr_pesquisa
                                 st.success("Login efetuado com sucesso!")
@@ -85,25 +85,22 @@ with col_topo2:
 
 st.divider()
 
-# Preferências de abas ativadas padrão
 padrao_ativado = "1" if user == "alysson" else "0"
 tem_divida = get_param(user, "ativ_divida", padrao_ativado) == "1"
 tem_casa = get_param(user, "ativ_casa", padrao_ativado) == "1"
 tem_extra = get_param(user, "ativ_extra", padrao_ativado) == "1"
 tem_projetos = get_param(user, "ativ_projetos", padrao_ativado) == "1"
 
-# Busca as abas geradas por IA para este usuário
 try:
     with engine.connect() as conn:
         df_abas_ia = pd.read_sql_query(
-            text("SELECT id, nome_aba, icone, config_colunas FROM usuario_abas_ia WHERE usuario = :u ORDER BY id ASC"),
+            text("SELECT id, nome_aba, icone, config_colunas FROM usuario_abas_ia WHERE LOWER(usuario) = LOWER(:u) ORDER BY id ASC"),
             conn,
             params={"u": user}
         )
 except Exception:
     df_abas_ia = pd.DataFrame()
 
-# Monta o menu superior completo
 nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📋 Lançamentos e Edição"]
 if tem_divida: nomes_abas.append("📌 Dívida Fixa")
 if tem_casa: nomes_abas.append("❤️ Casa / Financiamento")
@@ -120,22 +117,21 @@ nomes_abas.append("⚙️ Regras e Backup")
 abas_criadas = st.tabs(nomes_abas)
 
 idx = 0
-with abas_criadas[idx]: dashboard.render(user, conn_fin, CATEGORIAS_DESPESAS); idx += 1
-with abas_criadas[idx]: importacao.render(user, conn_fin, c_fin, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
-with abas_criadas[idx]: lancamentos.render(user, conn_fin, c_fin, TODAS_CATEGORIAS); idx += 1
+with abas_criadas[idx]: dashboard.render(user, engine, CATEGORIAS_DESPESAS); idx += 1
+with abas_criadas[idx]: importacao.render(user, engine, engine, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
+with abas_criadas[idx]: lancamentos.render(user, engine, engine, TODAS_CATEGORIAS); idx += 1
 
 if tem_divida:
-    with abas_criadas[idx]: dividas_casa.render_divida(user, conn_proj, c_proj, get_param, set_param); idx += 1
+    with abas_criadas[idx]: dividas_casa.render_divida(user, engine, engine, get_param, set_param); idx += 1
 if tem_casa:
-    with abas_criadas[idx]: dividas_casa.render_casa(user, conn_proj, c_proj, get_param, set_param); idx += 1
+    with abas_criadas[idx]: dividas_casa.render_casa(user, engine, engine, get_param, set_param); idx += 1
 if tem_extra:
-    with abas_criadas[idx]: dividas_casa.render_extra_casa(user, conn_proj, c_proj, get_param); idx += 1
+    with abas_criadas[idx]: dividas_casa.render_extra_casa(user, engine, engine, get_param); idx += 1
 if tem_projetos:
-    with abas_criadas[idx]: projetos.render(user, conn_proj, c_proj); idx += 1
+    with abas_criadas[idx]: projetos.render(user, engine, engine); idx += 1
 
-with abas_criadas[idx]: metas.render(user, conn_proj, c_proj); idx += 1
+with abas_criadas[idx]: metas.render(user, engine, engine); idx += 1
 
-# Renderiza as abas customizadas por IA
 if not df_abas_ia.empty:
     for _, aba in df_abas_ia.iterrows():
         aba_id = int(aba['id'])
@@ -146,7 +142,7 @@ if not df_abas_ia.empty:
             
             try:
                 with engine.connect() as conn:
-                    res_db = conn.execute(text("SELECT dados_json FROM dados_abas_ia WHERE aba_id = :aid AND usuario = :u"), {"aid": aba_id, "u": user}).fetchone()
+                    res_db = conn.execute(text("SELECT dados_json FROM dados_abas_ia WHERE aba_id = :aid AND LOWER(usuario) = LOWER(:u)"), {"aid": aba_id, "u": user}).fetchone()
                     dados_atuais = json.loads(res_db[0]) if res_db else []
             except Exception:
                 dados_atuais = []
@@ -190,9 +186,9 @@ if not df_abas_ia.empty:
                     json_para_salvar = json.dumps(novos_dados)
                     with engine.connect() as connection:
                         with connection.begin():
-                            existe = connection.execute(text("SELECT id FROM dados_abas_ia WHERE aba_id = :aid AND usuario = :u"), {"aid": aba_id, "u": user}).fetchone()
+                            existe = connection.execute(text("SELECT id FROM dados_abas_ia WHERE aba_id = :aid AND LOWER(usuario) = LOWER(:u)"), {"aid": aba_id, "u": user}).fetchone()
                             if existe:
-                                connection.execute(text("UPDATE dados_abas_ia SET dados_json = :dj WHERE aba_id = :aid AND usuario = :u"), {"dj": json_para_salvar, "aid": aba_id, "u": user})
+                                connection.execute(text("UPDATE dados_abas_ia SET dados_json = :dj WHERE aba_id = :aid AND LOWER(usuario) = LOWER(:u)"), {"dj": json_para_salvar, "aid": aba_id, "u": user})
                             else:
                                 connection.execute(text("INSERT INTO dados_abas_ia (aba_id, usuario, dados_json) VALUES (:aid, :u, :dj)"), {"aid": aba_id, "u": user, "dj": json_para_salvar})
                     st.success("Salvo com sucesso!")
@@ -201,4 +197,4 @@ if not df_abas_ia.empty:
                     st.error(f"Erro ao salvar: {e}")
         idx += 1
 
-with abas_criadas[idx]: config_backup.render(user, conn_fin, c_fin, get_param, set_param, GEMINI_API_KEY)
+with abas_criadas[idx]: config_backup.render(user, engine, engine, get_param, set_param, GEMINI_API_KEY)
