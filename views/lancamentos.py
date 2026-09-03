@@ -19,7 +19,6 @@ def render(user, conn_fin, c_fin, todas_categorias):
             except Exception as e:
                 st.error(f"Erro ao apagar: {e}")
 
-    # Correção para o Postgres: usando parâmetro nomeado com text()
     try:
         query = text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)")
         df = pd.read_sql_query(query, conn_fin, params={"u": user})
@@ -44,12 +43,27 @@ def render(user, conn_fin, c_fin, todas_categorias):
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
+                    # Identifica visualmente se é entrada ou saída para facilitar a leitura
+                    def identifica_tipo(cat):
+                        if cat in ["Ganhos Fixos", "Ganhos Variáveis"] or "GANHO" in str(cat).upper() or "SALÁRIO" in str(cat).upper():
+                            return "🟢 ENTRADA"
+                        elif cat == "Ignorar":
+                            return "⚪ IGNORAR"
+                        else:
+                            return "🔴 SAÍDA"
+
+                    df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
+
+                    # Reorganiza as colunas para o Tipo ficar logo após a descrição
+                    df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
+
                     editor_result = st.data_editor(
                         df_editavel,
                         column_config={
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
+                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
