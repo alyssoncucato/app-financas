@@ -7,21 +7,25 @@ from datetime import datetime
 def render(user, conn_fin, c_fin, todas_categorias):
     st.subheader("📋 Lançamentos e Edição por Mês")
 
-    # Botão de limpeza avançada escondido em expander para evitar cliques acidentais
     with st.expander("⚠️ Opções Avançadas / Limpeza de Dados"):
         st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos de extratos e faturas salvos permanentemente.")
         if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
             try:
                 with engine.connect() as connection:
                     with connection.begin():
-                        connection.execute(text("DELETE FROM transacoes WHERE usuario = :u"), {"u": user})
+                        connection.execute(text("DELETE FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), {"u": user})
                 st.success("Todos os lançamentos foram apagados com sucesso!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro ao apagar: {e}")
 
-    # Carrega todos os registros do usuário
-    df = pd.read_sql_query("SELECT * FROM transacoes WHERE usuario = ?", conn_fin, params=(user,))
+    # Correção para o Postgres: usando parâmetro nomeado com text()
+    try:
+        query = text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)")
+        df = pd.read_sql_query(query, conn_fin, params={"u": user})
+    except Exception as e:
+        st.error(f"Erro ao carregar lançamentos: {e}")
+        return
 
     if not df.empty:
         df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
@@ -30,23 +34,20 @@ def render(user, conn_fin, c_fin, todas_categorias):
         meses = sorted([m for m in df['mes_ano'].dropna().unique()], key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
         
         if meses:
-            # Seletor de mês principal para os lançamentos
             mes_escolhido = st.selectbox("📅 Filtrar Lançamentos do Mês:", meses, key="sel_mes_lancamentos")
             df_filtrado = df[df['mes_ano'] == mes_escolhido]
 
-            # Sub-abas visuais bem limpas para o mês escolhido
             tab_cc, tab_cartao, tab_todos = st.tabs(["🏦 Conta Corrente / Pix", "💳 Cartão de Crédito", "📁 Todos do Mês"])
 
             def render_editor(df_sub, key_sufixo):
                 if not df_sub.empty:
                     df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
-                    
                     df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
                     editor_result = st.data_editor(
                         df_editavel,
                         column_config={
-                            "id": None, # Esconde o ID
+                            "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
@@ -81,7 +82,6 @@ def render(user, conn_fin, c_fin, todas_categorias):
                                             }
                                         )
                             
-                            # Atualiza também a tabela de regras caso o usuário tenha categorizado manualmente
                             for _, row in editor_result.iterrows():
                                 if row['categoria'] not in ["Ganhos Fixos", "Ganhos Variáveis", "Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
