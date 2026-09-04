@@ -106,7 +106,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                         for tentativa in range(4):
                             try:
                                 response = client.models.generate_content(
-                                    model='models/gemini-2.5-flash', contents=prompt,
+                                    model='models/gemini-3.6-flash', contents=prompt,
                                     config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
                                 )
                                 break
