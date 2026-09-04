@@ -56,10 +56,12 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
+                # Ordena estritamente por ID decrescente ou data para manter a estabilidade da tabela
+                df_sub = df_sub.sort_values(by=['data', 'id'], ascending=[False, False]).copy()
+                
                 df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                # Lê estritamente o tipo gravado no banco. Se for dado antigo sem tipo, identifica pelo nome ou categoria original.
                 def resolve_tipo(row):
                     tp = row.get('tipo')
                     cat = str(row.get('categoria', '')).strip()
@@ -71,7 +73,6 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         else:
                             return "🔴 SAÍDA"
                     else:
-                        # Fallback inteligente para corrigir os registros antigos do banco de uma vez por todas
                         if cat in categorias_entradas or "JACKSON" in desc or "TERESINHA" in desc or "MARIA ISABEL" in desc:
                             return "🟢 ENTRADA"
                         return "🔴 SAÍDA"
@@ -80,15 +81,15 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
+                safe_periodo_key = str(periodo_sel).replace('/', '_').replace(' ', '_')
 
-                with st.form(f"form_editor_{key_sufixo}_{str(periodo_sel).replace('/', '_')}"):
+                with st.form(f"form_editor_{key_sufixo}_{safe_periodo_key}"):
                     editor_result = st.data_editor(
                         df_editavel,
                         column_config={
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            # TIPO BLINDADO: Apenas visualização fixa, inalterável pela categoria
                             "Tipo": st.column_config.TextColumn("Tipo (Fixo)", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
@@ -97,7 +98,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         },
                         hide_index=True,
                         num_rows="fixed",
-                        key=f"editor_lanc_{key_sufixo}_{str(periodo_sel).replace('/', '_')}"
+                        key=f"editor_lanc_{key_sufixo}_{safe_periodo_key}"
                     )
 
                     submitted = st.form_submit_button(f"💾 Salvar Alterações ({key_sufixo.upper()})", type="primary")
@@ -107,9 +108,10 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
-                                        # Grava ou mantém o tipo fixo no banco com base no que está na tela, garantindo que registros antigos salvem o tipo permanentemente
                                         tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
+                                        registro_id = int(row['id'])
                                         
+                                        # Atualiza diretamente focado no ID único, impedindo qualquer mistura por posição
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
@@ -124,10 +126,11 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 "sf": row['status_fatura'],
                                                 "orig": row['origem'],
                                                 "tp": tipo_salvar,
-                                                "id": int(row['id'])
+                                                "id": registro_id
                                             }
                                         )
                             
+                            # Atualiza regras de categorias associadas
                             for _, row in editor_result.iterrows():
                                 if row['categoria'] not in categorias_entradas and row['categoria'] not in ["Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
