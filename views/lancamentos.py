@@ -56,26 +56,17 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
-                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
+                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                # Lógica robusta: se já tem tipo salvo, usa ele. Se for registro antigo (vazio), deduz pelo tipo de categoria atual para corrigir o histórico.
-                def resolve_tipo(row):
-                    tp = row.get('tipo')
-                    cat = str(row.get('categoria', '')).strip()
-                    
-                    if pd.notna(tp) and str(tp).strip():
-                        if str(tp).upper() == "ENTRADA":
-                            return "🟢 ENTRADA"
-                        else:
-                            return "🔴 SAÍDA"
+                # Estritamente ENTRADA ou SAÍDA, sem "Ignorar"
+                def identifica_tipo(cat):
+                    if cat in categorias_entradas:
+                        return "🟢 ENTRADA"
                     else:
-                        # Fallback para dados antigos que não tinham o campo tipo gravado
-                        if cat in categorias_entradas:
-                            return "🟢 ENTRADA"
                         return "🔴 SAÍDA"
 
-                df_editavel['Tipo'] = df_editavel.apply(resolve_tipo, axis=1)
+                df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
@@ -87,8 +78,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            # CAMPO BLINDADO: Apenas visualização fixa do tipo importado/atribuído
-                            "Tipo": st.column_config.TextColumn("Tipo (Fixo)", disabled=True, width="small"),
+                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
@@ -106,13 +96,10 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
-                                        # Descobre o tipo correto para garantir que registros antigos ganhem o tipo no banco ao salvar
-                                        tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
-                                        
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
-                                                SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig, tipo = :tp
+                                                SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig 
                                                 WHERE id = :id
                                             """),
                                             {
@@ -122,7 +109,6 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 "cat": row['categoria'],
                                                 "sf": row['status_fatura'],
                                                 "orig": row['origem'],
-                                                "tp": tipo_salvar,
                                                 "id": int(row['id'])
                                             }
                                         )
