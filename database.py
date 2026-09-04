@@ -96,10 +96,12 @@ def inicializar_bancos():
 
 def get_param(usuario, chave, padrao=""):
     try:
+        u_str = str(usuario).strip() if usuario is not None else ""
+        c_str = str(chave).strip() if chave is not None else ""
         with engine.connect() as conn:
             res = conn.execute(
                 text("SELECT valor FROM parametros_gerais WHERE LOWER(usuario) = LOWER(:u) AND chave = :c"),
-                {"u": usuario, "c": chave}
+                {"u": u_str, "c": c_str}
             ).fetchone()
             if res and res[0] is not None:
                 return res[0]
@@ -109,6 +111,9 @@ def get_param(usuario, chave, padrao=""):
 
 def set_param(usuario, chave, valor):
     try:
+        u_str = str(usuario).strip() if usuario is not None else ""
+        c_str = str(chave).strip() if chave is not None else ""
+        v_str = str(valor) if valor is not None else ""
         with engine.connect() as connection:
             with connection.begin():
                 connection.execute(
@@ -118,7 +123,7 @@ def set_param(usuario, chave, valor):
                         ON CONFLICT (usuario, chave) 
                         DO UPDATE SET valor = :v
                     """),
-                    {"u": usuario, "c": chave, "v": str(valor)}
+                    {"u": u_str, "c": c_str, "v": v_str}
                 )
     except Exception as e:
         st.error(f"Erro ao salvar parâmetro: {e}")
