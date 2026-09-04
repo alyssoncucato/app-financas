@@ -69,9 +69,14 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             client = genai.Client(api_key=api_key)
             ano_atual = datetime.now().year
             origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
+            user_str = str(user).strip()
 
             try:
-                df_regras = pd.read_sql_query(text("SELECT termo_chave, categoria_destino FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), conn_fin, params={"u": user})
+                df_regras = pd.read_sql_query(
+                    text("SELECT termo_chave, categoria_destino FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), 
+                    conn_fin, 
+                    params={"u": user_str}
+                )
             except Exception:
                 df_regras = pd.DataFrame()
 
@@ -101,7 +106,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                         for tentativa in range(4):
                             try:
                                 response = client.models.generate_content(
-                                    model='models/gemini-3.6-flash', contents=prompt,
+                                    model='models/gemini-2.5-flash', contents=prompt,
                                     config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
                                 )
                                 break
@@ -111,58 +116,59 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                     continue
                                 raise ex
 
-                        dados = json.loads(response.text)
-                        itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
-                        
-                        if itens:
-                            # Conexão isolada e segura por arquivo processado para evitar conflito de transação
-                            with engine.begin() as connection:
-                                df_existentes = pd.read_sql_query(
-                                    text("SELECT data, descricao, valor, origem FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"),
-                                    connection,
-                                    params={"u": user}
-                                )
+                        if response and response.text:
+                            dados = json.loads(response.text)
+                            itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
+                            
+                            if itens:
+                                with engine.connect() as connection:
+                                    df_existentes = pd.read_sql_query(
+                                        text("SELECT data, descricao, valor, origem FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"),
+                                        connection,
+                                        params={"u": user_str}
+                                    )
 
-                                for item in itens:
-                                    duplicado = False
-                                    if not df_existentes.empty:
-                                        match = df_existentes[
-                                            (df_existentes['data'].astype(str).str.strip() == str(item['data']).strip()) &
-                                            (df_existentes['descricao'].astype(str).str.strip().lower() == str(item['descricao']).strip().lower()) &
-                                            (abs(df_existentes['valor'] - float(item['valor'])) < 0.01) &
-                                            (df_existentes['origem'].astype(str).str.strip() == str(item['origem']).strip())
-                                        ]
-                                        if not match.empty:
-                                            duplicado = True
+                                    for item in itens:
+                                        duplicado = False
+                                        if not df_existentes.empty:
+                                            match = df_existentes[
+                                                (df_existentes['data'].astype(str).str.strip() == str(item['data']).strip()) &
+                                                (df_existentes['descricao'].astype(str).str.strip().lower() == str(item['descricao']).strip().lower()) &
+                                                (abs(df_existentes['valor'] - float(item['valor'])) < 0.01) &
+                                                (df_existentes['origem'].astype(str).str.strip() == str(item['origem']).strip())
+                                            ]
+                                            if not match.empty:
+                                                duplicado = True
 
-                                    if not duplicado:
-                                        connection.execute(
-                                            text("""
-                                                INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem, tipo) 
-                                                VALUES (:u, :d, :desc, :v, :cat, :sf, :orig, :tp)
-                                            """),
-                                            {
-                                                "u": user,
-                                                "d": item['data'],
-                                                "desc": item['descricao'],
-                                                "v": item['valor'],
-                                                "cat": item['categoria'],
-                                                "sf": item['status_fatura'],
-                                                "orig": item['origem'],
-                                                "tp": item.get('tipo', 'SAÍDA')
-                                            }
-                                        )
-                                        total_itens_salvos += 1
-                                        todos_itens_exibicao.append(item)
-                                        
-                                        df_existentes = pd.concat([df_existentes, pd.DataFrame([{
-                                            "data": item['data'],
-                                            "descricao": item['descricao'],
-                                            "valor": item['valor'],
-                                            "origem": item['origem']
-                                        }])], ignore_index=True)
-                                    else:
-                                        total_itens_duplicados += 1
+                                        if not duplicado:
+                                            connection.execute(
+                                                text("""
+                                                    INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem, tipo) 
+                                                    VALUES (:u, :d, :desc, :v, :cat, :sf, :orig, :tp)
+                                                """),
+                                                {
+                                                    "u": user_str,
+                                                    "d": item['data'],
+                                                    "desc": item['descricao'],
+                                                    "v": item['valor'],
+                                                    "cat": item['categoria'],
+                                                    "sf": item['status_fatura'],
+                                                    "orig": item['origem'],
+                                                    "tp": item.get('tipo', 'SAÍDA')
+                                                }
+                                            )
+                                            connection.commit()
+                                            total_itens_salvos += 1
+                                            todos_itens_exibicao.append(item)
+                                            
+                                            df_existentes = pd.concat([df_existentes, pd.DataFrame([{
+                                                "data": item['data'],
+                                                "descricao": item['descricao'],
+                                                "valor": item['valor'],
+                                                "origem": item['origem']
+                                            }])], ignore_index=True)
+                                        else:
+                                            total_itens_duplicados += 1
                     except Exception as e:
                         st.error(f"Erro ao processar o arquivo {idx + 1}: {e}")
 
