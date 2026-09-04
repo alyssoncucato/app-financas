@@ -33,7 +33,6 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
         
         anos_disponiveis = sorted(list(df['ano'].unique()), reverse=True)
         
-        # Filtros de Ano e Período lado a lado
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             ano_sel = st.selectbox("📅 Filtrar por Ano:", anos_disponiveis)
@@ -46,7 +45,6 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
         with col_f2:
             periodo_sel = st.selectbox("📌 Filtrar Período Específico:", opcoes_periodo)
 
-        # Define o dataframe filtrado com base na escolha
         if periodo_sel == "Todos os Meses do Ano":
             df_filtrado = df_ano
             titulo_periodo = f"Ano Completo: {ano_sel}"
@@ -61,23 +59,14 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                 df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                # Identifica o Tipo baseando-se estritamente se a categoria atual pertence às entradas 
-                # OU se o nome/descrição ou comportamento original indica entrada (garantindo que o tipo venha da natureza e não mude por erro de categoria)
-                def identifica_tipo(row):
-                    cat = str(row['categoria']).strip()
-                    # Se já está categorizado como entrada ou se o valor/origem veio como entrada
+                # Define estritamente: Se for categoria de entrada = ENTRADA, caso contrário = SAÍDA
+                def identifica_tipo(cat):
                     if cat in categorias_entradas:
                         return "🟢 ENTRADA"
-                    elif cat == "Ignorar":
-                        return "⚪ IGNORAR"
                     else:
-                        # Fallback inteligente: se a categoria atual for de despesa, é saída. 
-                        # Mas se o usuário colocou uma categoria de entrada, respeita.
-                        if cat in categorias_despesas:
-                            return "🔴 SAÍDA"
                         return "🔴 SAÍDA"
 
-                df_editavel['Tipo'] = df_editavel.apply(identifica_tipo, axis=1)
+                df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
