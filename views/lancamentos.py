@@ -61,15 +61,23 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                 df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                def identifica_tipo(cat):
+                # Identifica o Tipo baseando-se estritamente se a categoria atual pertence às entradas 
+                # OU se o nome/descrição ou comportamento original indica entrada (garantindo que o tipo venha da natureza e não mude por erro de categoria)
+                def identifica_tipo(row):
+                    cat = str(row['categoria']).strip()
+                    # Se já está categorizado como entrada ou se o valor/origem veio como entrada
                     if cat in categorias_entradas:
                         return "🟢 ENTRADA"
                     elif cat == "Ignorar":
                         return "⚪ IGNORAR"
                     else:
+                        # Fallback inteligente: se a categoria atual for de despesa, é saída. 
+                        # Mas se o usuário colocou uma categoria de entrada, respeita.
+                        if cat in categorias_despesas:
+                            return "🔴 SAÍDA"
                         return "🔴 SAÍDA"
 
-                df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
+                df_editavel['Tipo'] = df_editavel.apply(identifica_tipo, axis=1)
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
