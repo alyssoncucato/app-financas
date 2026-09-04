@@ -71,16 +71,18 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
             user_str = str(user).strip()
 
+            regras_str = ""
             try:
-                df_regras = pd.read_sql_query(
-                    text("SELECT termo_chave, categoria_destino FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), 
-                    conn_fin, 
-                    params={"u": user_str}
-                )
+                with engine.connect() as conn_r:
+                    df_regras = pd.read_sql_query(
+                        text("SELECT termo_chave, categoria_destino FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), 
+                        conn_r, 
+                        params={"u": user_str}
+                    )
+                if df_regras is not None and not df_regras.empty:
+                    regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()])
             except Exception:
-                df_regras = pd.DataFrame()
-
-            regras_str = "\n".join([f"- Se contiver '{r['termo_chave']}', use '{r['categoria_destino']}'" for _, r in df_regras.iterrows()]) if not df_regras.empty else ""
+                regras_str = ""
 
             total_itens_salvos = 0
             total_itens_duplicados = 0
@@ -130,7 +132,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
 
                                     for item in itens:
                                         duplicado = False
-                                        if not df_existentes.empty:
+                                        if df_existentes is not None and not df_existentes.empty:
                                             match = df_existentes[
                                                 (df_existentes['data'].astype(str).str.strip() == str(item['data']).strip()) &
                                                 (df_existentes['descricao'].astype(str).str.strip().lower() == str(item['descricao']).strip().lower()) &
