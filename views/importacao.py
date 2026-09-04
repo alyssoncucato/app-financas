@@ -14,9 +14,9 @@ import pypdf
 class Transacao(BaseModel):
     data: str = Field(description="Data no formato YYYY-MM-DD")
     descricao: str = Field(description="Nome do estabelecimento, recebedor ou pagador")
-    valor: float = Field(description="Valor numérico")
+    valor: float = Field(description="Valor numérico absoluto")
     categoria: str = Field(description="Categoria da despesa ou ganho")
-    tipo: Literal["ENTRADA", "SAÍDA"] = Field(description="ENTRADA se for dinheiro recebido/crédito na conta, SAÍDA se for gasto/pagamento/débito")
+    tipo: Literal["ENTRADA", "SAÍDA"] = Field(description="ENTRADA se o dinheiro entrou/foi recebido/crédito. SAÍDA se o dinheiro saiu/foi gasto/pagamento/débito.")
     status_fatura: Literal["ABERTA", "FECHADA", "CONTA_CORRENTE"]
     origem: Literal["FATURA_CARTAO", "EXTRATO_CONTA"]
 
@@ -86,9 +86,10 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     prompt = f"""
                     Ano: {ano_atual}. Tipo de Origem: {origem_doc}.
                     {regras_str}
-                    INSTRUÇÃO CRÍTICA SOBRE O TIPO: 
-                    - Classifique estritamente como 'ENTRADA' se for recebimento de dinheiro, depósito, PIX recebido, salário ou ganhos.
-                    - Classifique estritamente como 'SAÍDA' se for compra, pagamento, débito, tarifa ou gasto.
+                    INSTRUÇÃO CRÍTICA SOBRE O TIPO (OBRIGATÓRIO):
+                    - Analise se a transação representa entrada de dinheiro (PIX recebido, depósito, transferência recebida, salário, crédito) -> defina como 'ENTRADA'.
+                    - Analise se a transação representa saída de dinheiro (compra, pagamento, débito, tarifa, saque) -> defina como 'SAÍDA'.
+                    O tipo depende EXCLUSIVAMENTE da natureza da movimentação no extrato, independentemente da categoria escolhida.
                     IGNORAR: Pagamento de fatura anterior, transferências entre contas do mesmo titular, resgate RDB, Pix no Crédito.
                     CATEGORIAS DISPONÍVEIS: {', '.join(todas_categorias)}
                     Conteúdo:

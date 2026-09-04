@@ -56,17 +56,27 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
-                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
+                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                # Estritamente ENTRADA ou SAÍDA, sem "Ignorar"
-                def identifica_tipo(cat):
-                    if cat in categorias_entradas:
-                        return "🟢 ENTRADA"
+                # Lê estritamente o tipo gravado no banco. Se for dado antigo sem tipo, identifica pelo nome ou categoria original.
+                def resolve_tipo(row):
+                    tp = row.get('tipo')
+                    cat = str(row.get('categoria', '')).strip()
+                    desc = str(row.get('descricao', '')).strip().upper()
+                    
+                    if pd.notna(tp) and str(tp).strip():
+                        if str(tp).upper() == "ENTRADA":
+                            return "🟢 ENTRADA"
+                        else:
+                            return "🔴 SAÍDA"
                     else:
+                        # Fallback inteligente para corrigir os registros antigos do banco de uma vez por todas
+                        if cat in categorias_entradas or "JACKSON" in desc or "TERESINHA" in desc or "MARIA ISABEL" in desc:
+                            return "🟢 ENTRADA"
                         return "🔴 SAÍDA"
 
-                df_editavel['Tipo'] = df_editavel['categoria'].apply(identifica_tipo)
+                df_editavel['Tipo'] = df_editavel.apply(resolve_tipo, axis=1)
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
@@ -78,7 +88,8 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
+                            # TIPO BLINDADO: Apenas visualização fixa, inalterável pela categoria
+                            "Tipo": st.column_config.TextColumn("Tipo (Fixo)", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
@@ -96,10 +107,13 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
+                                        # Grava ou mantém o tipo fixo no banco com base no que está na tela, garantindo que registros antigos salvem o tipo permanentemente
+                                        tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
+                                        
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
-                                                SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig 
+                                                SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig, tipo = :tp
                                                 WHERE id = :id
                                             """),
                                             {
@@ -109,6 +123,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 "cat": row['categoria'],
                                                 "sf": row['status_fatura'],
                                                 "orig": row['origem'],
+                                                "tp": tipo_salvar,
                                                 "id": int(row['id'])
                                             }
                                         )
