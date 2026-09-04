@@ -61,12 +61,19 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
         elif texto_fatura.strip():
             conteudos.append(texto_fatura)
 
-        if not api_key or api_key == "SUA_CHAVE_AQUI":
-            st.error("A chave da API do Gemini não foi configurada corretamente nos Secrets do Streamlit Cloud.")
+        # Configura a lista de chaves (a principal dos Secrets + a nova que você mandou)
+        chaves_disponiveis = [
+            api_key, 
+            "AQ.Ab84296LpjhIWvPe4njMTJDqtEVeBh_ElQj63BBrBv3ptcGlKBg" # Substitua ou ajuste conforme sua segunda chave completa se necessário
+        ]
+        # Remove chaves inválidas ou vazias
+        chaves_validas = [k.strip() for k in chaves_disponiveis if k and k != "SUA_CHAVE_AQUI"]
+
+        if not chaves_validas:
+            st.error("Nenhuma chave de API do Gemini foi configurada corretamente.")
         elif not conteudos:
             st.warning("Forneça pelo menos um arquivo válido ou cole o texto.")
         else:
-            client = genai.Client(api_key=api_key)
             ano_atual = datetime.now().year
             origem_doc = "FATURA_CARTAO" if "Fatura" in tipo_documento else "EXTRATO_CONTA"
             user_str = str(user).strip()
@@ -103,22 +110,42 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     {conteudo}
                     """
 
-                    try:
-                        response = None
-                        for tentativa in range(4):
-                            try:
-                                response = client.models.generate_content(
-                                    model='models/gemini-3.6-flash', contents=prompt,
-                                    config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
-                                )
-                                break
-                            except Exception as ex:
-                                if ("503" in str(ex) or "UNAVAILABLE" in str(ex)) and tentativa < 3:
-                                    time.sleep(3)
-                                    continue
-                                raise ex
+                    response = None
+                    sucesso_requisicao = False
 
-                        if response and response.text:
+                    # Tenta rodar a IA fazendo rotação automática entre as chaves em caso de erro 429 (cota esgotada)
+                    for chave_atual in chaves_validas:
+                        try:
+                            client = genai.Client(api_key=chave_atual)
+                            
+                            for tentativa in range(3):
+                                try:
+                                    response = client.models.generate_content(
+                                        model='models/gemini-3.6-flash', contents=prompt,
+                                        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=ExtratoProcessado, temperature=0.0)
+                                    )
+                                    if response and response.text:
+                                        sucesso_requisicao = True
+                                        break
+                                except Exception as ex_tentativa:
+                                    if ("503" in str(ex_tentativa) or "UNAVAILABLE" in str(ex_tentativa)) and tentativa < 2:
+                                        time.sleep(2)
+                                        continue
+                                    raise ex_tentativa
+
+                            if sucesso_requisicao:
+                                break # Passou com essa chave, sai do loop de chaves
+                        except Exception as ex_chave:
+                            # Se estourou a cota (429), tenta a próxima chave da lista
+                            if "429" in str(ex_chave) or "RESOURCE_EXHAUSTED" in str(ex_chave):
+                                continue
+                            else:
+                                # Outro erro qualquer, exibe e para
+                                st.error(f"Erro na IA (Arquivo {idx + 1}): {ex_chave}")
+                                break
+
+                    if sucesso_requisicao and response and response.text:
+                        try:
                             dados = json.loads(response.text)
                             itens = [it for it in dados.get("itens", []) if it['categoria'] != "Ignorar"]
                             
@@ -171,8 +198,10 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                             }])], ignore_index=True)
                                         else:
                                             total_itens_duplicados += 1
-                    except Exception as e:
-                        st.error(f"Erro ao processar o arquivo {idx + 1}: {e}")
+                        except Exception as e_parse:
+                            st.error(f"Erro ao salvar dados do arquivo {idx + 1}: {e_parse}")
+                    elif not sucesso_requisicao:
+                        st.error(f"Todas as chaves de API falharam ou atingiram a cota no arquivo {idx + 1}.")
 
             if todos_itens_exibicao or total_itens_duplicados > 0:
                 if todos_itens_exibicao:
