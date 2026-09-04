@@ -20,6 +20,11 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
     df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
     df['ano'] = df['data_dt'].dt.year.fillna(datetime.now().year).astype(int)
     df['mes_ano'] = df['data_dt'].dt.strftime('%m/%Y')
+    
+    # Padroniza a coluna tipo para garantir o cálculo líquido correto
+    if 'tipo' not in df.columns:
+        df['tipo'] = "SAÍDA"
+    df['tipo'] = df['tipo'].fillna("SAÍDA").str.upper()
 
     # --- MENU DE NAVEGAÇÃO PRINCIPAL ---
     st.markdown("### 🎯 Seleção de Visualização")
@@ -66,13 +71,13 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         st.warning(f"Nenhum registro encontrado para {tipo_visao} em {titulo_periodo}.")
         return
 
-    # --- CÁLCULOS USANDO AS ENTRADAS PERSONALIZADAS ---
-    if "Conta Corrente" in tipo_visao or "Visão Geral" in tipo_visao:
-        receitas = df_final[df_final['categoria'].isin(categorias_entradas)]['valor'].sum()
-    else:
-        receitas = 0.0
-
-    despesas = df_final[df_final['categoria'].isin(categorias_despesas)]['valor'].sum()
+    # --- CÁLCULOS LÍQUIDOS REAIS ---
+    # Receitas puras (excluindo itens ignorados)
+    receitas = df_final[(df_final['tipo'] == 'ENTRADA') & (~df_final['categoria'].isin(["Ignorar"]))]['valor'].sum()
+    
+    # Despesas puras (excluindo entradas cruzadas ou itens ignorados)
+    despesas = df_final[(df_final['tipo'] == 'SAÍDA') & (~df_final['categoria'].isin(["Ignorar"]))]['valor'].sum()
+    
     saldo = receitas - despesas
 
     m1, m2, m3 = st.columns(3)
@@ -90,58 +95,91 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
 
     st.divider()
 
+    # --- PROCESSAMENTO LÍQUIDO POR CATEGORIA ---
+    # Para cada categoria, calculamos: Total de Saídas menos Total de Entradas (Ex: Aluguel Mãe: Entrou 1700, Saiu 1700 = Líquido 0 ou saldo real)
+    todas_as_cats = list(set(categorias_despesas + categorias_entradas))
+    
+    resumo_cat_list = []
+    for cat in todas_as_cats:
+        if cat == "Ignorar":
+            continue
+        df_cat_all = df_final[df_final['categoria'] == cat]
+        if not df_cat_all.empty:
+            t_saida = df_cat_all[df_cat_all['tipo'] == 'SAÍDA']['valor'].sum()
+            t_entrada = df_cat_all[df_cat_all['tipo'] == 'ENTRADA']['valor'].sum()
+            
+            # Valor líquido representativo para exibição (focado no impacto financeiro real da categoria)
+            valor_liquido = t_saida - t_entrada
+            
+            resumo_cat_list.append({
+                'categoria': cat,
+                'saida': t_saida,
+                'entrada': t_entrada,
+                'valor_liquido': valor_liquido,
+                'qtd': len(df_cat_all)
+            })
+            
+    df_resumo_cat = pd.DataFrame(resumo_cat_list)
+
     # --- GRÁFICOS ---
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
-        st.markdown("#### 📊 Despesas por Categoria")
-        df_cat = df_final[df_final['categoria'].isin(categorias_despesas)].groupby('categoria')['valor'].sum().reset_index()
-        df_cat = df_cat[df_cat['valor'] > 0]
-        if not df_cat.empty:
-            st.bar_chart(df_cat.set_index('categoria')['valor'], color="#ff4b4b")
+        st.markdown("#### 📊 Impacto Líquido por Categoria")
+        if not df_resumo_cat.empty:
+            df_graf = df_resumo_cat[df_resumo_cat['valor_liquido'] != 0].set_index('categoria')['valor_liquido']
+            if not df_graf.empty:
+                st.bar_chart(df_graf, color="#ff4b4b")
+            else:
+                st.info("Todas as categorias estão balanceadas (saldo líquido zero) neste período.")
         else:
-            st.info("Sem despesas para exibir no gráfico.")
+            st.info("Sem dados para exibir no gráfico.")
 
     with col_g2:
-        st.markdown("#### 📅 Evolução ou Maiores Gastos")
+        st.markdown("#### 📅 Evolução ou Maiores Lançamentos")
         if mes_sel == "Todos os Meses do Ano":
-            df_evolucao = df_filtrado[df_filtrado['categoria'].isin(categorias_despesas)].groupby('mes_ano')['valor'].sum().reset_index()
+            df_evolucao = df_final[df_final['tipo'] == 'SAÍDA'].groupby('mes_ano')['valor'].sum().reset_index()
             if not df_evolucao.empty:
                 df_evolucao['mes_ordem'] = pd.to_datetime(df_evolucao['mes_ano'], format='%m/%Y')
                 st.line_chart(df_evolucao.sort_values('mes_ordem').set_index('mes_ano')['valor'])
             else:
                 st.info("Sem dados para evolução.")
         else:
-            df_maiores = df_final.nlargest(5, 'valor')[['data', 'descricao', 'valor', 'categoria']]
+            df_maiores = df_final.nlargest(5, 'valor')[['data', 'descricao', 'valor', 'tipo', 'categoria']]
             st.dataframe(df_maiores, use_container_width=True, hide_index=True)
 
     st.divider()
 
     # --- ÁRVORE DETALHADA POR CATEGORIA -> ESTABELECIMENTO -> LANÇAMENTOS ---
-    st.markdown("### 📂 Detalhamento em Árvore por Categoria (Expandível)")
-    st.caption("Clique nas categorias abaixo para abrir, ver os estabelecimentos agrupados e checar cada dia e valor.")
+    st.markdown("### 📂 Detalhamento em Árvore por Categoria (Com Entradas e Saídas)")
+    st.caption("Clique nas categorias abaixo para abrir, ver o fluxo de entradas/saídas, estabelecimentos e valores detalhados.")
 
-    df_desp = df_final[df_final['categoria'].isin(categorias_despesas)].copy()
+    df_validos = df_final[df_final['categoria'] != "Ignorar"].copy()
 
-    if df_desp.empty:
-        st.info("Nenhuma despesa detalhada para este filtro.")
+    if df_validos.empty:
+        st.info("Nenhum lançamento detalhado para este filtro.")
         return
 
-    df_desp['estabelecimento'] = df_desp['descricao'].str.strip().str.upper()
-    categorias_presentes = sorted(df_desp['categoria'].unique())
+    df_validos['estabelecimento'] = df_validos['descricao'].str.strip().str.upper()
+    cats_presentes = sorted(df_validos['categoria'].unique())
 
-    for cat in categorias_presentes:
-        df_cat_itens = df_desp[df_desp['categoria'] == cat]
-        total_cat = df_cat_itens['valor'].sum()
+    for cat in cats_presentes:
+        df_cat_itens = df_validos[df_validos['categoria'] == cat]
+        t_saidas_cat = df_cat_itens[df_cat_itens['tipo'] == 'SAÍDA']['valor'].sum()
+        t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
+        liquido_cat = t_saidas_cat - t_entradas_cat
 
-        with st.expander(f"📁 **{cat}** — Total: R$ {total_cat:,.2f} ({len(df_cat_itens)} itens)"):
+        label_expander = f"📁 **{cat}** — Impacto Líquido: R$ {liquido_cat:,.2f} *(Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f})* — ({len(df_cat_itens)} itens)"
+
+        with st.expander(label_expander):
             estabelecimentos = sorted(df_cat_itens['estabelecimento'].unique())
             
             for estab in estabelecimentos:
                 df_estab_itens = df_cat_itens[df_cat_itens['estabelecimento'] == estab]
-                total_estab = df_estab_itens['valor'].sum()
-
-                with st.expander(f"🔹 **{estab}** — Subtotal: R$ {total_estab:,.2f} ({len(df_estab_itens)}x)"):
+                t_estab = df_estab_itens['valor'].sum()
+                
+                with st.expander(f"🔹 **{estab}** — Subtotal: R$ {t_estab:,.2f} ({len(df_estab_itens)}x)"):
                     for _, row in df_estab_itens.iterrows():
                         data_formatada = pd.to_datetime(row['data']).strftime('%d/%m/%Y') if pd.notna(row['data']) else "Data não inf."
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Valor:** `R$ {row['valor']:,.2f}` | *Origem:* {row['origem']}")
+                        tipo_icone = "🟢 ENTRADA" if row['tipo'] == 'ENTRADA' else "🔴 SAÍDA"
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Tipo:** {tipo_icone} | **Valor:** `R$ {row['valor']:,.2f}` | *Origem:* {row['origem']}")
