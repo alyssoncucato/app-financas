@@ -2,7 +2,7 @@ import streamlit as st
 import json
 from sqlalchemy import text
 from database import inicializar_bancos, engine, get_param, set_param
-from views import dashboard, importacao, lancamentos, dividas_casa, projetos, config_backup, metas
+from views import dashboard, importacao, importacao_nativa, lancamentos, dividas_casa, projetos, config_backup, metas
 import pandas as pd
 
 st.set_page_config(page_title="Minhas Finanças", page_icon="💰", layout="wide")
@@ -110,7 +110,7 @@ try:
 except Exception:
     df_abas_ia = pd.DataFrame()
 
-nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📋 Lançamentos e Edição"]
+nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📥 Importação Nativa", "📋 Lançamentos e Edição"]
 if tem_divida: nomes_abas.append("📌 Dívida Fixa")
 if tem_casa: nomes_abas.append("❤️ Casa / Financiamento")
 if tem_extra: nomes_abas.append("🏠 Extra Casa")
@@ -128,6 +128,7 @@ abas_criadas = st.tabs(nomes_abas)
 idx = 0
 with abas_criadas[idx]: dashboard.render(user, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS); idx += 1
 with abas_criadas[idx]: importacao.render(user, engine, engine, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
+with abas_criadas[idx]: importacao_nativa.render(user, engine, engine, TODAS_CATEGORIAS); idx += 1
 with abas_criadas[idx]: lancamentos.render(user, engine, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS); idx += 1
 
 if tem_divida:
