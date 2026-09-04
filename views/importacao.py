@@ -16,6 +16,7 @@ class Transacao(BaseModel):
     descricao: str = Field(description="Nome do estabelecimento, recebedor ou pagador")
     valor: float = Field(description="Valor numérico")
     categoria: str = Field(description="Categoria da despesa ou ganho")
+    tipo: Literal["ENTRADA", "SAÍDA"] = Field(description="ENTRADA se for dinheiro recebido/crédito na conta, SAÍDA se for gasto/pagamento/débito")
     status_fatura: Literal["ABERTA", "FECHADA", "CONTA_CORRENTE"]
     origem: Literal["FATURA_CARTAO", "EXTRATO_CONTA"]
 
@@ -83,8 +84,11 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
             for idx, conteudo in enumerate(conteudos):
                 with st.spinner(f"A IA está analisando o documento {idx + 1} de {len(conteudos)}..."):
                     prompt = f"""
-                    Ano: {ano_atual}. Tipo: {origem_doc}.
+                    Ano: {ano_atual}. Tipo de Origem: {origem_doc}.
                     {regras_str}
+                    INSTRUÇÃO CRÍTICA SOBRE O TIPO: 
+                    - Classifique estritamente como 'ENTRADA' se for recebimento de dinheiro, depósito, PIX recebido, salário ou ganhos.
+                    - Classifique estritamente como 'SAÍDA' se for compra, pagamento, débito, tarifa ou gasto.
                     IGNORAR: Pagamento de fatura anterior, transferências entre contas do mesmo titular, resgate RDB, Pix no Crédito.
                     CATEGORIAS DISPONÍVEIS: {', '.join(todas_categorias)}
                     Conteúdo:
@@ -133,8 +137,8 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                         if not duplicado:
                                             connection.execute(
                                                 text("""
-                                                    INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem) 
-                                                    VALUES (:u, :d, :desc, :v, :cat, :sf, :orig)
+                                                    INSERT INTO transacoes (usuario, data, descricao, valor, categoria, status_fatura, origem, tipo) 
+                                                    VALUES (:u, :d, :desc, :v, :cat, :sf, :orig, :tp)
                                                 """),
                                                 {
                                                     "u": user,
@@ -143,7 +147,8 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                                     "v": item['valor'],
                                                     "cat": item['categoria'],
                                                     "sf": item['status_fatura'],
-                                                    "orig": item['origem']
+                                                    "orig": item['origem'],
+                                                    "tp": item.get('tipo', 'SAÍDA')
                                                 }
                                             )
                                             total_itens_salvos += 1

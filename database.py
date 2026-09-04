@@ -4,21 +4,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-# Lê a URL do banco dos segredos do Streamlit
 DATABASE_URL = st.secrets.get("DATABASE_URL", "")
 
 if not DATABASE_URL:
     st.error("Erro crítico: A variável DATABASE_URL não foi encontrada nos Secrets do Streamlit.")
 
-# Força a conversão para a porta 6543 (Transaction Mode do Supabase)
 if "pooler.supabase.com" in DATABASE_URL:
     if ":5432" in DATABASE_URL:
         DATABASE_URL = DATABASE_URL.replace(":5432", ":6543")
     elif ":6543" not in DATABASE_URL:
-        # Se por acaso não tiver porta, injeta a 6543 antes do /postgres
         DATABASE_URL = DATABASE_URL.replace(".pooler.supabase.com/postgres", ".pooler.supabase.com:6543/postgres")
 
-# NullPool garante zero conexões presas no Supabase
 engine = create_engine(
     DATABASE_URL, 
     poolclass=NullPool,
@@ -54,8 +50,13 @@ def inicializar_bancos():
                         valor DOUBLE PRECISION NOT NULL,
                         categoria TEXT NOT NULL,
                         status_fatura TEXT,
-                        origem TEXT
+                        origem TEXT,
+                        tipo TEXT
                     );
+                """))
+                # Garante a coluna caso a tabela já exista
+                connection.execute(text("""
+                    ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS tipo TEXT;
                 """))
                 connection.execute(text("""
                     CREATE TABLE IF NOT EXISTS regras_categorias (
@@ -118,7 +119,7 @@ def set_param(usuario, chave, valor):
                         ON CONFLICT (usuario, chave) 
                         DO UPDATE SET valor = :v
                     """),
-                    {"u": usuario, "c": chave, "v": str(valor)}
+                    {"u": user if 'user' in locals() else '', "c": chave, "v": str(valor)}
                 )
     except Exception as e:
         st.error(f"Erro ao salvar parâmetro: {e}")

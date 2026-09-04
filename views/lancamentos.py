@@ -8,7 +8,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
     st.subheader("📋 Lançamentos e Edição por Mês / Ano")
 
     with st.expander("⚠️ Opções Avançadas / Limpeza de Dados"):
-        st.warning("Atenção: A ação abaixo apagará **todos** os lançamentos salvos permanentemente.")
+        st.warning("Atenção: A ação abaixo apagará **todos** los lançamentos salvos permanentemente.")
         if st.button("🗑️ Apagar Todos os Lançamentos", type="secondary"):
             try:
                 with engine.connect() as connection:
@@ -56,22 +56,16 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
-                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem']].copy()
+                df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
 
-                # BLINDAGEM FIXA: O tipo é determinado exclusivamente pelo sinal do valor ou pela natureza da importação.
-                # Se o valor for negativo ou padrão de gasto = SAÍDA, se positivo e veio de repasse/recebimento ou categorias de ganho = ENTRADA.
-                # Para garantir que o passado e o futuro fiquem corretos: checa se a categoria é de entrada OU se o valor representa entrada.
-                def tipo_blindado(row):
-                    cat = str(row['categoria']).strip()
-                    val = float(row['valor'])
-                    # Se explicitamente categorizado como ganho ou se o valor for positivo vindo de pessoa física/recebimento comum
-                    if cat in categorias_entradas:
+                # Formata visualmente o tipo salvo no banco
+                def formata_tipo(tp):
+                    if str(tp).upper() == "ENTRADA":
                         return "🟢 ENTRADA"
-                    # Caso contrário, se for despesa padrão ou valor padrão de débito
                     return "🔴 SAÍDA"
 
-                df_editavel['Tipo'] = df_sub.apply(tipo_blindado, axis=1)
+                df_editavel['Tipo'] = df_editavel['tipo'].apply(formata_tipo)
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
@@ -83,7 +77,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             "id": None,
                             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
                             "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            # COLUNA BLINDADA (Disabled=True), o usuário NÃO mexe nela manualmente. O sistema define e ela fica fixa.
+                            # CAMPO BLINDADO: O usuário visualiza o tipo definido na importação mas não consegue alterar por engano.
                             "Tipo": st.column_config.TextColumn("Tipo (Fixo)", disabled=True, width="small"),
                             "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
@@ -102,6 +96,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
+                                        # Atualiza apenas os dados editáveis, preservando estritamente a integridade do Tipo original do banco
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
