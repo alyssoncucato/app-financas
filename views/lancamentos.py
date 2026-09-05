@@ -78,11 +78,13 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
                 df_editavel['Tipo'] = df_editavel.apply(resolve_tipo, axis=1)
                 
-                # Garante valores válidos para as colunas de selectbox para evitar erros do Streamlit
+                # Adiciona coluna de checkbox para exclusão em massa
+                df_editavel['Excluir'] = False
+
                 df_editavel['origem'] = df_editavel['origem'].fillna('EXTRATO_CONTA').apply(lambda x: 'FATURA_CARTAO' if str(x).strip().upper() == 'FATURA_CARTAO' else 'EXTRATO_CONTA')
                 df_editavel['status_fatura'] = df_editavel['status_fatura'].fillna('CONTA_CORRENTE').apply(lambda x: str(x).strip().upper() if str(x).strip().upper() in ['ABERTA', 'FECHADA', 'CONTA_CORRENTE'] else 'CONTA_CORRENTE')
 
-                df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
+                df_editavel = df_editavel[['Excluir', 'id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
                 safe_periodo_key = str(periodo_sel).replace('/', '_').replace(' ', '_')
@@ -91,11 +93,12 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                     editor_result = st.data_editor(
                         df_editavel,
                         column_config={
+                            "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir?", default=False, width="small"),
                             "id": None,
-                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
-                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
-                            "Tipo": st.column_config.TextColumn("Tipo (Fixo)", disabled=True, width="small"),
-                            "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
+                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", disabled=True),
+                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", disabled=True),
+                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
+                            "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", disabled=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
@@ -105,7 +108,32 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         key=f"editor_lanc_{key_sufixo}_{safe_periodo_key}"
                     )
 
-                    submitted = st.form_submit_button(f"💾 Salvar Alterações ({key_sufixo.upper()})", type="primary")
+                    col_b1, col_b2 = st.columns([2, 1])
+                    with col_b1:
+                        submitted = st.form_submit_button(f"💾 Salvar Alterações ({key_sufixo.upper()})", type="primary")
+                    with col_b2:
+                        btn_apagar_selecionados = st.form_submit_button("🗑️ Apagar Marcados", type="secondary")
+
+                    if btn_apagar_selecionados:
+                        try:
+                            ids_para_apagar = []
+                            for _, row in editor_result.iterrows():
+                                if row.get('Excluir') == True and pd.notna(row.get('id')):
+                                    ids_para_apagar.append(int(row['id']))
+
+                            if ids_para_apagar:
+                                with engine.connect() as connection:
+                                    with connection.begin():
+                                        connection.execute(
+                                            text("DELETE FROM transacoes WHERE id = ANY(:ids) AND LOWER(usuario) = LOWER(:u)"),
+                                            {"ids": ids_para_apagar, "u": user}
+                                        )
+                                st.success(f"{len(ids_para_apagar)} lançamentos selecionados foram apagados com sucesso!")
+                                st.rerun()
+                            else:
+                                st.warning("Nenhum item foi marcado com a caixinha 'Excluir?' para apagar.")
+                        except Exception as e:
+                            st.error(f"Erro ao apagar itens selecionados: {e}")
 
                     if submitted:
                         try:
