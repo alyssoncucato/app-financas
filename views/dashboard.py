@@ -161,14 +161,13 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
         liquido_cat = t_entradas_cat - t_saidas_cat
 
-        # Cores e formatação limpa baseada no saldo líquido
         cor_liq = "#2ecc71" if liquido_cat >= 0 else "#e74c3c"
         sinal_liq = "+" if liquido_cat > 0 else ""
         
-        # Usamos colunas visuais limpas dentro do container para garantir que a cor e o R$ fiquem perfeitos sem poluição
-        with st.expander(f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)", expanded=False):
+        # Expander principal apenas com o nome da categoria para manter o clique limpo
+        with st.expander(f"📁 {cat}", expanded=False):
             
-            # Linha de resumo estilizada com HTML seguro dentro do corpo (sem duplicar texto fora)
+            # Linha interna estilizada exatamente como você aprovou no print anterior
             st.markdown(
                 f"<div style='font-size:15px; margin-bottom: 10px;'>"
                 f"<b>{cat}</b> — Impacto Líquido: "
