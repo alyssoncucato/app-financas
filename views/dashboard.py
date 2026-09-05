@@ -161,9 +161,14 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
         liquido_cat = t_entradas_cat - t_saidas_cat
 
+        # Cores: Verde se positivo/entrada, Vermelho se negativo/saída
         cor_liq = "#2ecc71" if liquido_cat >= 0 else "#e74c3c"
         
-        with st.expander(f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)", expanded=False):
+        # Título padrão limpo para o expander
+        titulo_expander = f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)"
+
+        with st.expander(titulo_expander, expanded=False):
+            # Conteúdo interno limpo e formatado exatamente como você pediu
             st.markdown(
                 f"<span style='color:white;'><b>{cat}</b> — Impacto Líquido: "
                 f"<span style='color:{cor_liq};'>R$ {liquido_cat:,.2f}</span> — "
