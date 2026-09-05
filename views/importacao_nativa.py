@@ -50,24 +50,27 @@ def render(user, conn_fin, c_fin, todas_categorias):
     st.subheader("📥 Importação Nativa (.OFX / .CSV)")
     st.info("Esta aba lê seus extratos bancários de forma 100% matemática, sem consumir cota de Inteligência Artificial.")
 
-    arquivo = st.file_uploader("Selecione o arquivo OFX ou CSV do banco:", type=["ofx", "csv"], key="uploader_nativo")
+    # Alterado para aceitar multiplos arquivos
+    arquivos = st.file_uploader("Selecione um ou mais arquivos OFX ou CSV do banco:", type=["ofx", "csv"], accept_multiple_files=True, key="uploader_nativo_multiplo")
 
-    if arquivo is not None:
-        transacoes_lidas = []
+    if arquivos:
+        todas_transacoes_lidas = []
         
-        if arquivo.name.lower().endswith(".ofx"):
-            transacoes_lidas = parse_ofx(arquivo.getvalue())
-        elif arquivo.name.lower().endswith(".csv"):
-            try:
-                df_csv = pd.read_csv(arquivo, encoding="utf-8", errors="ignore")
-                st.write("Prévia do CSV detectado:", df_csv.head(2))
-                st.warning("Para arquivos CSV, certifique-se de que o formato possui colunas de Data, Descrição e Valor.")
-            except Exception as e:
-                st.error(f"Erro ao ler CSV: {e}")
+        for arquivo in arquivos:
+            if arquivo.name.lower().endswith(".ofx"):
+                trans_arq = parse_ofx(arquivo.getvalue())
+                todas_transacoes_lidas.extend(trans_arq)
+            elif arquivo.name.lower().endswith(".csv"):
+                try:
+                    df_csv = pd.read_csv(arquivo, encoding="utf-8", errors="ignore")
+                    st.write(f"Prévia do CSV detectado ({arquivo.name}):", df_csv.head(2))
+                    st.warning("Para arquivos CSV, certifique-se de que o formato possui colunas compatíveis.")
+                except Exception as e:
+                    st.error(f"Erro ao ler CSV {arquivo.name}: {e}")
 
-        if transacoes_lidas:
-            df_preview = pd.DataFrame(transacoes_lidas)
-            st.success(f"Foram identificadas **{len(df_preview)}** transações no arquivo.")
+        if todas_transacoes_lidas:
+            df_preview = pd.DataFrame(todas_transacoes_lidas)
+            st.success(f"Foram identificadas no total **{len(df_preview)}** transações nos arquivos enviados.")
             
             st.markdown("### Prévia dos Lançamentos:")
             st.dataframe(df_preview, use_container_width=True)
@@ -87,7 +90,7 @@ def render(user, conn_fin, c_fin, todas_categorias):
                     except Exception:
                         df_existentes = pd.DataFrame()
 
-                    for item in transacoes_lidas:
+                    for item in todas_transacoes_lidas:
                         duplicado = False
                         if df_existentes is not None and not df_existentes.empty and 'descricao' in df_existentes.columns:
                             try:
