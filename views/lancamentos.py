@@ -56,7 +56,8 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
-                df_sub = df_sub.sort_values(by=['data', 'id'], ascending=[False, False]).copy()
+                # Mantém ordenação estável baseada estritamente no ID imutável do banco em ordem decrescente
+                df_sub = df_sub.sort_values(by=['id'], ascending=[False]).copy()
                 
                 df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
                 df_editavel['data'] = pd.to_datetime(df_editavel['data'], errors='coerce').dt.date
@@ -78,12 +79,13 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
                 df_editavel['Tipo'] = df_editavel.apply(resolve_tipo, axis=1)
                 
-                # Adiciona coluna de checkbox para exclusão em massa
+                # Coluna de seleção para exclusão pontual
                 df_editavel['Excluir'] = False
 
                 df_editavel['origem'] = df_editavel['origem'].fillna('EXTRATO_CONTA').apply(lambda x: 'FATURA_CARTAO' if str(x).strip().upper() == 'FATURA_CARTAO' else 'EXTRATO_CONTA')
                 df_editavel['status_fatura'] = df_editavel['status_fatura'].fillna('CONTA_CORRENTE').apply(lambda x: str(x).strip().upper() if str(x).strip().upper() in ['ABERTA', 'FECHADA', 'CONTA_CORRENTE'] else 'CONTA_CORRENTE')
 
+                # Mantemos o 'id' visível desativado ou oculto de forma controlada, mas essencial para o mapeamento exato
                 df_editavel = df_editavel[['Excluir', 'id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
@@ -94,11 +96,11 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         df_editavel,
                         column_config={
                             "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir?", default=False, width="small"),
-                            "id": None,
-                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", disabled=True),
-                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", disabled=True),
+                            "id": st.column_config.NumberColumn("ID Único", disabled=True, width="small"),
+                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY", required=True),
+                            "descricao": st.column_config.TextColumn("Estabelecimento / Descrição", width="large", required=True),
                             "Tipo": st.column_config.TextColumn("Tipo", disabled=True, width="small"),
-                            "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", disabled=True),
+                            "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f", required=True),
                             "categoria": st.column_config.SelectboxColumn("Categoria", options=todas_opcoes, required=True),
                             "status_fatura": st.column_config.SelectboxColumn("Status", options=["ABERTA", "FECHADA", "CONTA_CORRENTE"], required=True),
                             "origem": st.column_config.SelectboxColumn("Origem", options=["FATURA_CARTAO", "EXTRATO_CONTA"], required=True),
@@ -140,29 +142,36 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                             with engine.connect() as connection:
                                 with connection.begin():
                                     for _, row in editor_result.iterrows():
-                                        tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
+                                        # Identificação cirúrgica por ID único imutável do banco de dados
+                                        if pd.isna(row.get('id')):
+                                            continue
+                                            
                                         registro_id = int(row['id'])
+                                        tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
                                         origem_salvar = str(row['origem']).strip()
                                         status_salvar = str(row['status_fatura']).strip()
                                         
+                                        # Update blindado amarrado estritamente ao ID único
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
                                                 SET data = :d, descricao = :desc, valor = :v, categoria = :cat, status_fatura = :sf, origem = :orig, tipo = :tp
-                                                WHERE id = :id
+                                                WHERE id = :id AND LOWER(usuario) = LOWER(:u)
                                             """),
                                             {
                                                 "d": str(row['data']),
-                                                "desc": row['descricao'],
+                                                "desc": str(row['descricao']),
                                                 "v": float(row['valor']),
-                                                "cat": row['categoria'],
+                                                "cat": str(row['categoria']),
                                                 "sf": status_salvar,
                                                 "orig": origem_salvar,
                                                 "tp": tipo_salvar,
-                                                "id": registro_id
+                                                "id": registro_id,
+                                                "u": user
                                             }
                                         )
                             
+                            # Atualiza regras automáticas com base nas descrições limpas
                             for _, row in editor_result.iterrows():
                                 if row['categoria'] not in categorias_entradas and row['categoria'] not in ["Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
@@ -177,7 +186,7 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 {"u": user, "t": termo_limpo, "c": row['categoria']}
                                             )
 
-                            st.success("Alterações salvas com sucesso!")
+                            st.success("Alterações salvas com sucesso vinculadas aos IDs únicos!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao salvar alterações: {e}")
