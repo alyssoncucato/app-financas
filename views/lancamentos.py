@@ -56,7 +56,6 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
 
         def render_editor(df_sub, key_sufixo):
             if not df_sub.empty:
-                # Ordena estritamente por ID decrescente ou data para manter a estabilidade da tabela
                 df_sub = df_sub.sort_values(by=['data', 'id'], ascending=[False, False]).copy()
                 
                 df_editavel = df_sub[['id', 'data', 'descricao', 'valor', 'categoria', 'status_fatura', 'origem', 'tipo']].copy()
@@ -78,6 +77,11 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                         return "🔴 SAÍDA"
 
                 df_editavel['Tipo'] = df_editavel.apply(resolve_tipo, axis=1)
+                
+                # Garante valores válidos para as colunas de selectbox para evitar erros do Streamlit
+                df_editavel['origem'] = df_editavel['origem'].fillna('EXTRATO_CONTA').apply(lambda x: 'FATURA_CARTAO' if str(x).strip().upper() == 'FATURA_CARTAO' else 'EXTRATO_CONTA')
+                df_editavel['status_fatura'] = df_editavel['status_fatura'].fillna('CONTA_CORRENTE').apply(lambda x: str(x).strip().upper() if str(x).strip().upper() in ['ABERTA', 'FECHADA', 'CONTA_CORRENTE'] else 'CONTA_CORRENTE')
+
                 df_editavel = df_editavel[['id', 'data', 'descricao', 'Tipo', 'valor', 'categoria', 'status_fatura', 'origem']]
 
                 todas_opcoes = list(set(categorias_despesas + categorias_entradas + ["Ignorar"]))
@@ -110,8 +114,9 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                     for _, row in editor_result.iterrows():
                                         tipo_salvar = "ENTRADA" if "ENTRADA" in str(row['Tipo']) else "SAÍDA"
                                         registro_id = int(row['id'])
+                                        origem_salvar = str(row['origem']).strip()
+                                        status_salvar = str(row['status_fatura']).strip()
                                         
-                                        # Atualiza diretamente focado no ID único, impedindo qualquer mistura por posição
                                         connection.execute(
                                             text("""
                                                 UPDATE transacoes 
@@ -123,14 +128,13 @@ def render(user, conn_fin, c_fin, categorias_despesas, categorias_entradas):
                                                 "desc": row['descricao'],
                                                 "v": float(row['valor']),
                                                 "cat": row['categoria'],
-                                                "sf": row['status_fatura'],
-                                                "orig": row['origem'],
+                                                "sf": status_salvar,
+                                                "orig": origem_salvar,
                                                 "tp": tipo_salvar,
                                                 "id": registro_id
                                             }
                                         )
                             
-                            # Atualiza regras de categorias associadas
                             for _, row in editor_result.iterrows():
                                 if row['categoria'] not in categorias_entradas and row['categoria'] not in ["Ignorar", "Não sei"]:
                                     termo_limpo = str(row['descricao']).strip().upper()
