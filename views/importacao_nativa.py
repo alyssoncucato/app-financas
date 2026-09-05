@@ -5,7 +5,7 @@ from datetime import datetime
 from database import engine
 from sqlalchemy import text
 
-def parse_ofx(file_content):
+def parse_ofx(file_content, tipo_origem):
     """Lê arquivos OFX de forma nativa e retorna uma lista de dicionários com as transações."""
     transacoes = []
     try:
@@ -22,23 +22,34 @@ def parse_ofx(file_content):
                 dt_str = data_match.group(1)
                 data_formatada = f"{dt_str[:4]}-{dt_str[4:6]}-{dt_str[6:]}"
                 
-                valor = float(valor_match.group(1))
+                valor_raw = float(valor_match.group(1))
                 
-                desc = "LANÇAMENTO BANCÁRIO"
+                desc = "LANÇAMENTO"
                 if memo_match:
                     desc = memo_match.group(1).strip()
                 elif name_match:
                     desc = name_match.group(1).strip()
                 
-                tipo = "ENTRADA" if valor > 0 else "SAÍDA"
+                if tipo_origem == "FATURA_CARTAO":
+                    # Fatura de cartão: o valor costuma vir negativo no OFX (gasto), tratamos como valor absoluto e tipo SAÍDA
+                    valor = abs(valor_raw)
+                    tipo = "SAÍDA"
+                    origem = "FATURA_CARTAO"
+                    status_fatura = "ABERTA"
+                else:
+                    # Extrato de conta corrente
+                    valor = abs(valor_raw)
+                    tipo = "ENTRADA" if valor_raw > 0 else "SAÍDA"
+                    origem = "EXTRATO_CONTA"
+                    status_fatura = "CONTA_CORRENTE"
                 
                 transacoes.append({
                     "data": data_formatada,
                     "descricao": desc.upper(),
-                    "valor": abs(valor),
+                    "valor": valor,
                     "tipo": tipo,
-                    "origem": "EXTRATO_CONTA",
-                    "status_fatura": "CONTA_CORRENTE",
+                    "origem": origem,
+                    "status_fatura": status_fatura,
                     "categoria": "Não Categorizado"
                 })
     except Exception as e:
@@ -48,17 +59,31 @@ def parse_ofx(file_content):
 
 def render(user, conn_fin, c_fin, todas_categorias):
     st.subheader("📥 Importação Nativa (.OFX / .CSV)")
-    st.info("Esta aba lê seus extratos bancários de forma 100% matemática, sem consumir cota de Inteligência Artificial.")
+    st.info("Esta aba lê seus extratos bancários ou faturas de forma 100% matemática, sem consumir cota de Inteligência Artificial.")
 
-    # Alterado para aceitar multiplos arquivos
-    arquivos = st.file_uploader("Selecione um ou mais arquivos OFX ou CSV do banco:", type=["ofx", "csv"], accept_multiple_files=True, key="uploader_nativo_multiplo")
+    # Seletor para definir se o arquivo é Extrato ou Fatura
+    tipo_destino = st.radio(
+        "O que você está importando?", 
+        ["🏦 Extrato de Conta Corrente / Pix", "💳 Fatura de Cartão de Crédito"], 
+        horizontal=True,
+        key="radio_tipo_importacao_nat"
+    )
+    
+    origem_escolhida = "FATURA_CARTAO" if "Fatura" in tipo_destino else "EXTRATO_CONTA"
+
+    arquivos = st.file_uploader(
+        "Selecione um ou mais arquivos OFX ou CSV:", 
+        type=["ofx", "csv"], 
+        accept_multiple_files=True, 
+        key="uploader_nativo_multiplo"
+    )
 
     if arquivos:
         todas_transacoes_lidas = []
         
         for arquivo in arquivos:
             if arquivo.name.lower().endswith(".ofx"):
-                trans_arq = parse_ofx(arquivo.getvalue())
+                trans_arq = parse_ofx(arquivo.getvalue(), origem_escolhida)
                 todas_transacoes_lidas.extend(trans_arq)
             elif arquivo.name.lower().endswith(".csv"):
                 try:
@@ -70,7 +95,7 @@ def render(user, conn_fin, c_fin, todas_categorias):
 
         if todas_transacoes_lidas:
             df_preview = pd.DataFrame(todas_transacoes_lidas)
-            st.success(f"Foram identificadas no total **{len(df_preview)}** transações nos arquivos enviados.")
+            st.success(f"Foram identificadas no total **{len(df_preview)}** transações com destino para: **{'Cartão de Crédito' if origem_escolhida == 'FATURA_CARTAO' else 'Conta Corrente'}**.")
             
             st.markdown("### Prévia dos Lançamentos:")
             st.dataframe(df_preview, use_container_width=True)
