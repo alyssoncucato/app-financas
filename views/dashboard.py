@@ -1,102 +1,4 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-from sqlalchemy import text
-
-def render(user, conn_fin, categorias_despesas, categorias_entradas):
-    st.subheader("📊 Dashboard Financeiro Estruturado")
-    
-    try:
-        query = text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)")
-        df = pd.read_sql_query(query, conn_fin, params={"u": user})
-    except Exception as e:
-        st.error(f"Erro ao carregar transações: {e}")
-        return
-    
-    if df.empty:
-        st.info("Nenhum lançamento encontrado. Importe extratos ou faturas para visualizar o dashboard.")
-        return
-
-    df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
-    df['ano'] = df['data_dt'].dt.year.fillna(datetime.now().year).astype(int)
-    df['mes_ano'] = df['data_dt'].dt.strftime('%m/%Y')
-    
-    # Padroniza a coluna tipo para garantir o cálculo líquido correto
-    if 'tipo' not in df.columns:
-        df['tipo'] = "SAÍDA"
-    df['tipo'] = df['tipo'].fillna("SAÍDA").str.upper()
-
-    # --- MENU DE NAVEGAÇÃO PRINCIPAL ---
-    st.markdown("### 🎯 Seleção de Visualização")
-    
-    col_n1, col_n2, col_n3 = st.columns(3)
-    
-    with col_n1:
-        tipo_visao = st.selectbox(
-            "1. Fonte de Dados:", 
-            ["Visão Geral (Consolidada)", "💳 Cartão Nubank", "💳 Cartão Mercado Pago", "🏦 Extrato Conta Corrente"]
-        )
-    
-    with col_n2:
-        anos_disponiveis = sorted(list(df['ano'].unique()), reverse=True)
-        if not anos_disponiveis:
-            anos_disponiveis = [datetime.now().year]
-        ano_sel = st.selectbox("2. Ano:", anos_disponiveis)
-
-    df_ano = df[df['ano'] == ano_sel]
-
-    if "Nubank" in tipo_visao or "Mercado Pago" in tipo_visao:
-        df_filtrado = df_ano[df_ano['origem'] == 'FATURA_CARTAO']
-    elif "Conta Corrente" in tipo_visao:
-        df_filtrado = df_ano[df_ano['origem'] == 'EXTRATO_CONTA']
-    else:
-        df_filtrado = df_ano
-
-    with col_n3:
-        meses_ano = sorted(df_filtrado['mes_ano'].dropna().unique(), key=lambda x: datetime.strptime(x, '%m/%Y'))
-        opcoes_mes = ["Todos os Meses do Ano"] + meses_ano
-        mes_sel = st.selectbox("3. Mês:", opcoes_mes)
-
-    if mes_sel != "Todos os Meses do Ano":
-        df_final = df_filtrado[df_filtrado['mes_ano'] == mes_sel]
-        titulo_periodo = f"Mês: {mes_sel} ({ano_sel})"
-    else:
-        df_final = df_filtrado
-        titulo_periodo = f"Ano Consolidado: {ano_sel}"
-
-    st.divider()
-    st.markdown(f"### 📈 Métricas para: **{tipo_visao}** — *{titulo_periodo}*")
-
-    if df_final.empty:
-        st.warning(f"Nenhum registro encontrado para {tipo_visao} em {titulo_periodo}.")
-        return
-
-    # --- CÁLCULOS LÍQUIDOS REAIS ---
-    # Receitas puras (excluindo itens ignorados)
-    receitas = df_final[(df_final['tipo'] == 'ENTRADA') & (~df_final['categoria'].isin(["Ignorar"]))]['valor'].sum()
-    
-    # Despesas puras (excluindo entradas cruzadas ou itens ignorados)
-    despesas = df_final[(df_final['tipo'] == 'SAÍDA') & (~df_final['categoria'].isin(["Ignorar"]))]['valor'].sum()
-    
-    saldo = receitas - despesas
-
-    m1, m2, m3 = st.columns(3)
-    if "Conta Corrente" in tipo_visao or "Visão Geral" in tipo_visao:
-        m1.metric("💰 Entradas / Receitas", f"R$ {receitas:,.2f}")
-    else:
-        m1.metric("💳 Total de Gastos", f"R$ {despesas:,.2f}")
-        
-    m2.metric("📉 Total de Despesas", f"R$ {despesas:,.2f}")
-    
-    if "Conta Corrente" in tipo_visao or "Visão Geral" in tipo_visao:
-        m3.metric("⚖️ Saldo do Período", f"R$ {saldo:,.2f}", delta=f"{saldo:,.2f}")
-    else:
-        m3.metric("📊 Qtd. Lançamentos", f"{len(df_final)} itens")
-
-    st.divider()
-
-    # --- PROCESSAMENTO LÍQUIDO POR CATEGORIA ---
-    # Para cada categoria, calculamos: Total de Saídas menos Total de Entradas (Ex: Aluguel Mãe: Entrou 1700, Saiu 1700 = Líquido 0 ou saldo real)
+# --- PROCESSAMENTO LÍQUIDO POR CATEGORIA ---
     todas_as_cats = list(set(categorias_despesas + categorias_entradas))
     
     resumo_cat_list = []
@@ -108,8 +10,8 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
             t_saida = df_cat_all[df_cat_all['tipo'] == 'SAÍDA']['valor'].sum()
             t_entrada = df_cat_all[df_cat_all['tipo'] == 'ENTRADA']['valor'].sum()
             
-            # Valor líquido representativo para exibição (focado no impacto financeiro real da categoria)
-            valor_liquido = t_saida - t_entrada
+            # Impacto Líquido Real: Entradas menos Saídas (quanto sobrou/movimentou de fato na categoria)
+            valor_liquido = t_entrada - t_saida
             
             resumo_cat_list.append({
                 'categoria': cat,
@@ -129,9 +31,9 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         if not df_resumo_cat.empty:
             df_graf = df_resumo_cat[df_resumo_cat['valor_liquido'] != 0].set_index('categoria')['valor_liquido']
             if not df_graf.empty:
-                st.bar_chart(df_graf, color="#ff4b4b")
+                st.bar_chart(df_graf)
             else:
-                st.info("Todas as categorias estão balanceadas (saldo líquido zero) neste período.")
+                st.info("Todas as categorias estão balanceadas neste período.")
         else:
             st.info("Sem dados para exibir no gráfico.")
 
@@ -167,9 +69,12 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         df_cat_itens = df_validos[df_validos['categoria'] == cat]
         t_saidas_cat = df_cat_itens[df_cat_itens['tipo'] == 'SAÍDA']['valor'].sum()
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
-        liquido_cat = t_saidas_cat - t_entradas_cat
+        liquido_cat = t_entradas_cat - t_saidas_cat
 
-        label_expander = f"📁 **{cat}** — Impacto Líquido: R$ {liquido_cat:,.2f} *(Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f})* — ({len(df_cat_itens)} itens)"
+        # Define a cor visual com base no impacto líquido (Verde se >= 0, Vermelho se < 0)
+        cor_emoji = "🟢" if liquido_cat >= 0 else "🔴"
+        
+        label_expander = f"📁 **{cat}** — Impacto Líquido: {cor_emoji} **R$ {liquido_cat:,.2f}** *(Entrou: 🟢 R$ {t_entradas_cat:,.2f} | Saiu: 🔴 R$ {t_saidas_cat:,.2f})* — ({len(df_cat_itens)} itens)"
 
         with st.expander(label_expander):
             estabelecimentos = sorted(df_cat_itens['estabelecimento'].unique())
