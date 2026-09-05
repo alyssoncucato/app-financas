@@ -161,19 +161,14 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
         liquido_cat = t_entradas_cat - t_saidas_cat
 
-        # Cores em HEX para os valores líquidos
         cor_liq = "#2ecc71" if liquido_cat >= 0 else "#e74c3c"
         
-        # Expander principal limpo
-        label_texto = f"📁 **{cat}** — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)"
-
-        with st.expander(label_texto, expanded=False):
-            # Resumo detalhado interno com cores elegantes nos valores
+        with st.expander(f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)", expanded=False):
             st.markdown(
-                f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Resumo da Categoria:</b> "
-                f"Impacto Líquido: <span style='color:{cor_liq}; font-weight:bold;'>R$ {liquido_cat:,.2f}</span> | "
-                f"Entrou: <span style='color:#2ecc71; font-weight:bold;'>R$ {t_entradas_cat:,.2f}</span> | "
-                f"Saiu: <span style='color:#e74c3c; font-weight:bold;'>R$ {t_saidas_cat:,.2f}</span>",
+                f"<span style='color:white;'><b>{cat}</b> — Impacto Líquido: "
+                f"<span style='color:{cor_liq};'>R$ {liquido_cat:,.2f}</span> — "
+                f"(Entrou: <span style='color:#2ecc71;'>R$ {t_entradas_cat:,.2f}</span> | "
+                f"Saiu: <span style='color:#e74c3c;'>R$ {t_saidas_cat:,.2f}</span>) — ({len(df_cat_itens)} itens)</span>",
                 unsafe_allow_html=True
             )
             st.divider()
@@ -187,10 +182,10 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
                 with st.expander(f"🔹 **{estab}** — Subtotal: R$ {t_estab:,.2f} ({len(df_estab_itens)}x)"):
                     for _, row in df_estab_itens.iterrows():
                         data_formatada = pd.to_datetime(row['data']).strftime('%d/%m/%Y') if pd.notna(row['data']) else "Data não inf."
-                        tipo_icone = "🟢 ENTRADA" if row['tipo'] == 'ENTRADA' else "🔴 SAÍDA"
+                        tipo_texto = "ENTRADA" if row['tipo'] == 'ENTRADA' else "SAÍDA"
                         val_cor = "#2ecc71" if row['tipo'] == 'ENTRADA' else "#e74c3c"
                         st.markdown(
-                            f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Tipo:** {tipo_icone} | "
-                            f"**Valor:** <span style='color:{val_cor}; font-weight:bold;'>R$ {row['valor']:,.2f}</span> | *Origem:* {row['origem']}",
+                            f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Tipo:** {tipo_texto} | "
+                            f"**Valor:** <span style='color:{val_cor};'>R$ {row['valor']:,.2f}</span> | *Origem:* {row['origem']}",
                             unsafe_allow_html=True
                         )
