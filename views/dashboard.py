@@ -161,19 +161,21 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
         liquido_cat = t_entradas_cat - t_saidas_cat
 
-        # Cores: Verde se positivo/entrada, Vermelho se negativo/saída
+        # Cores e formatação limpa baseada no saldo líquido
         cor_liq = "#2ecc71" if liquido_cat >= 0 else "#e74c3c"
+        sinal_liq = "+" if liquido_cat > 0 else ""
         
-        # Título padrão limpo para o expander
-        titulo_expander = f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)"
-
-        with st.expander(titulo_expander, expanded=False):
-            # Conteúdo interno limpo e formatado exatamente como você pediu
+        # Usamos colunas visuais limpas dentro do container para garantir que a cor e o R$ fiquem perfeitos sem poluição
+        with st.expander(f"📁 {cat} — Impacto Líquido: R$ {liquido_cat:,.2f} — (Entrou: R$ {t_entradas_cat:,.2f} | Saiu: R$ {t_saidas_cat:,.2f}) — ({len(df_cat_itens)} itens)", expanded=False):
+            
+            # Linha de resumo estilizada com HTML seguro dentro do corpo (sem duplicar texto fora)
             st.markdown(
-                f"<span style='color:white;'><b>{cat}</b> — Impacto Líquido: "
-                f"<span style='color:{cor_liq};'>R$ {liquido_cat:,.2f}</span> — "
-                f"(Entrou: <span style='color:#2ecc71;'>R$ {t_entradas_cat:,.2f}</span> | "
-                f"Saiu: <span style='color:#e74c3c;'>R$ {t_saidas_cat:,.2f}</span>) — ({len(df_cat_itens)} itens)</span>",
+                f"<div style='font-size:15px; margin-bottom: 10px;'>"
+                f"<b>{cat}</b> — Impacto Líquido: "
+                f"<span style='color:{cor_liq}; font-weight:bold;'>R$ {sinal_liq}{liquido_cat:,.2f}</span> — "
+                f"(Entrou: <span style='color:#2ecc71; font-weight:bold;'>R$ {t_entradas_cat:,.2f}</span> | "
+                f"Saiu: <span style='color:#e74c3c; font-weight:bold;'>R$ {t_saidas_cat:,.2f}</span>) — ({len(df_cat_itens)} itens)"
+                f"</div>",
                 unsafe_allow_html=True
             )
             st.divider()
@@ -191,6 +193,6 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas):
                         val_cor = "#2ecc71" if row['tipo'] == 'ENTRADA' else "#e74c3c"
                         st.markdown(
                             f"&nbsp;&nbsp;&nbsp;&nbsp;• **Data:** {data_formatada} | **Tipo:** {tipo_texto} | "
-                            f"**Valor:** <span style='color:{val_cor};'>R$ {row['valor']:,.2f}</span> | *Origem:* {row['origem']}",
+                            f"**Valor:** <span style='color:{val_cor}; font-weight:bold;'>R$ {row['valor']:,.2f}</span> | *Origem:* {row['origem']}",
                             unsafe_allow_html=True
                         )
