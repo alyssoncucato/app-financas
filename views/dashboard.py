@@ -28,14 +28,14 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
     df['tipo'] = df['tipo'].fillna("SAÍDA").str.upper()
 
     # --- SALDO REAL ACUMULADO DA CONTA CORRENTE ---
-    # Considera todas as movimentações reais de extrato histórico até o momento
     saldo_inicial_str = get_param(user, "saldo_inicial_conta", "0.0") if get_param else "0.0"
     try:
         saldo_partida = float(saldo_inicial_str)
     except Exception:
         saldo_partida = 0.0
 
-    df_cc_historico = df[df['origem'] == 'EXTRATO_CONTA']
+    # No saldo físico da conta corrente, apenas ignoramos transferências internas (RDB)
+    df_cc_historico = df[(df['origem'] == 'EXTRATO_CONTA') & (~df['categoria'].isin(["Ignorar"]))]
     total_entradas_historico = df_cc_historico[df_cc_historico['tipo'] == 'ENTRADA']['valor'].sum()
     total_saidas_historico = df_cc_historico[df_cc_historico['tipo'] == 'SAÍDA']['valor'].sum()
     saldo_atual_em_conta = saldo_partida + total_entradas_historico - total_saidas_historico
@@ -81,16 +81,28 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
 
     st.divider()
 
-    # --- CÁLCULOS DO PERÍODO SELECIONADO ---
-    # Na visão consolidada, removemos pagamentos de fatura feitos na conta para evitar contar a despesa 2 vezes
+    # --- FILTRO BLINDADO CONTRA DUPLICIDADES E PAGAMENTOS DE FATURA ---
+    # Remove itens marcados como 'Ignorar' (ex: Caixinhas/RDB)
+    df_base_calc = df_final[~df_final['categoria'].isin(["Ignorar"])]
+
     if tipo_visao == "Visão Geral (Consolidada)":
-        mask_ignorar_duplicidade = (df_final['origem'] == 'EXTRATO_CONTA') & (
-            (df_final['categoria'].str.upper().isin(["PAGAMENTO FATURA", "IGNORAR"])) | 
-            (df_final['descricao'].str.upper().str.contains("PAGAMENTO DE FATURA|PAGTO FATURA|PGTO FATURA|FATURA CARTAO"))
+        # 1. Ignora o débito de pagamento de fatura na conta corrente
+        mask_pgto_cc = (df_base_calc['origem'] == 'EXTRATO_CONTA') & (
+            (df_base_calc['categoria'].str.upper().isin(["PAGAMENTO FATURA"])) |
+            (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO DE FATURA|PAGTO FATURA|PGTO FATURA|FATURA CARTAO"))
         )
-        df_calculo = df_final[~mask_ignorar_duplicidade]
+        # 2. Ignora o crédito de 'pagamento recebido' que abate a fatura do cartão
+        mask_pgto_cartao = (df_base_calc['origem'] == 'FATURA_CARTAO') & (
+            (df_base_calc['categoria'].str.upper().isin(["PAGAMENTO FATURA"])) |
+            (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO RECEBIDO"))
+        )
+        df_calculo = df_base_calc[~(mask_pgto_cc | mask_pgto_cartao)]
+    elif "Cartão" in tipo_visao:
+        # No cartão, esconde o crédito de pagamento recebido para mostrar o total real de compras
+        mask_pgto_cartao = (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO RECEBIDO")) | (df_base_calc['categoria'].str.upper() == "PAGAMENTO FATURA")
+        df_calculo = df_base_calc[~mask_pgto_cartao]
     else:
-        df_calculo = df_final[~df_final['categoria'].isin(["Ignorar"])]
+        df_calculo = df_base_calc
 
     receitas = df_calculo[df_calculo['tipo'] == 'ENTRADA']['valor'].sum()
     despesas = df_calculo[df_calculo['tipo'] == 'SAÍDA']['valor'].sum()
@@ -115,14 +127,14 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
         dias_passados = max(hoje.day, 1)
         dias_restantes = max(dias_no_mes - dias_passados, 0)
 
-        # Ritmo diário de gastos reais
+        # Ritmo diário de gastos reais do mês
         media_gasto_dia = despesas / dias_passados
         gasto_projetado_fim_mes = despesas + (media_gasto_dia * dias_restantes)
         resultado_projetado_mes = receitas - gasto_projetado_fim_mes
         saldo_conta_previsto_fim_mes = saldo_atual_em_conta - (media_gasto_dia * dias_restantes)
 
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("⏱️ Ritmo Diário de Gastos", f"R$ {media_gasto_dia:,.2f}/dia", help="Média de dinheiro gasto por dia neste mês")
+        p1.metric("⏱️ Ritmo Diário de Gastos", f"R$ {media_gasto_dia:,.2f}/dia", help="Média gasta por dia até o momento")
         p2.metric("📅 Projeção de Despesa Total", f"R$ {gasto_projetado_fim_mes:,.2f}", help="Estimativa mantendo seu ritmo diário atual")
         p3.metric("🎯 Resultado Previsto do Mês", f"R$ {resultado_projetado_mes:,.2f}", delta=f"{resultado_projetado_mes:,.2f}")
         p4.metric("🏁 Saldo Previsto em Conta", f"R$ {saldo_conta_previsto_fim_mes:,.2f}", delta=f"Faltam {dias_restantes} dias")
@@ -130,11 +142,11 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
     st.divider()
 
     # --- PROCESSAMENTO POR CATEGORIA ---
-    todas_as_cats = list(set(categorias_despesas + categorias_entradas))
+    todas_as_cats = list(set(categorias_despesas + categorias_entradas + ["Não Categorizado", "Estorno"]))
     resumo_cat_list = []
     
     for cat in todas_as_cats:
-        if cat == "Ignorar":
+        if cat in ["Ignorar", "PAGAMENTO FATURA"]:
             continue
         df_cat = df_calculo[df_calculo['categoria'] == cat]
         if not df_cat.empty:
@@ -184,6 +196,8 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
     cats_presentes = sorted(df_validos['categoria'].unique())
 
     for cat in cats_presentes:
+        if cat in ["Ignorar", "PAGAMENTO FATURA"]:
+            continue
         df_cat_itens = df_validos[df_validos['categoria'] == cat]
         t_saidas_cat = df_cat_itens[df_cat_itens['tipo'] == 'SAÍDA']['valor'].sum()
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
