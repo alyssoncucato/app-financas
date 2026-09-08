@@ -24,22 +24,30 @@ class ExtratoProcessado(BaseModel):
     itens: List[Transacao]
 
 def render(user, conn_fin, c_fin, todas_categorias, api_key):
-    st.subheader("Lançar Extrato ou Fatura")
+    st.subheader("⚡ Lançar Extrato ou Fatura com IA")
 
-    tipo_documento = st.radio("Tipo de documento:", ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], horizontal=True)
-    
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
-    arquivos_extrato = st.file_uploader(
-        "Faça upload de um ou mais arquivos (.csv, .ofx, .txt, .pdf):", 
-        type=["csv", "ofx", "txt", "pdf"], 
-        accept_multiple_files=True,
-        key=f"file_uploader_{st.session_state.uploader_key}"
-    )
-    texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas...", height=120)
+    with st.form("form_importacao_ia"):
+        tipo_documento = st.radio(
+            "Tipo de documento:", 
+            ["💳 Fatura de Cartão de Crédito", "🏦 Extrato de Conta Corrente / Pix"], 
+            horizontal=True
+        )
+        
+        arquivos_extrato = st.file_uploader(
+            "Faça upload de um ou mais arquivos (.csv, .ofx, .txt, .pdf):", 
+            type=["csv", "ofx", "txt", "pdf"], 
+            accept_multiple_files=True,
+            key=f"file_uploader_{st.session_state.uploader_key}"
+        )
+        
+        texto_fatura = st.text_area("Ou cole o texto aqui:", placeholder="Cole as linhas do extrato...", height=140)
 
-    if st.button("Processar com IA", type="primary"):
+        btn_processar = st.form_submit_button("🚀 Processar e Salvar com IA", type="primary")
+
+    if btn_processar:
         conteudos = []
         
         if arquivos_extrato:
@@ -61,12 +69,7 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
         elif texto_fatura.strip():
             conteudos.append(texto_fatura)
 
-        # Configura a lista de chaves (a principal dos Secrets + a nova que você mandou)
-        chaves_disponiveis = [
-            api_key, 
-            "AQ.Ab84296LpjhIWvPe4njMTJDqtEVeBh_ElQj63BBrBv3ptcGlKBg" # Substitua ou ajuste conforme sua segunda chave completa se necessário
-        ]
-        # Remove chaves inválidas ou vazias
+        chaves_disponiveis = [api_key]
         chaves_validas = [k.strip() for k in chaves_disponiveis if k and k != "SUA_CHAVE_AQUI"]
 
         if not chaves_validas:
@@ -113,7 +116,6 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     response = None
                     sucesso_requisicao = False
 
-                    # Tenta rodar a IA fazendo rotação automática entre as chaves em caso de erro 429 (cota esgotada)
                     for chave_atual in chaves_validas:
                         try:
                             client = genai.Client(api_key=chave_atual)
@@ -134,13 +136,11 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                     raise ex_tentativa
 
                             if sucesso_requisicao:
-                                break # Passou com essa chave, sai do loop de chaves
+                                break
                         except Exception as ex_chave:
-                            # Se estourou a cota (429), tenta a próxima chave da lista
                             if "429" in str(ex_chave) or "RESOURCE_EXHAUSTED" in str(ex_chave):
                                 continue
                             else:
-                                # Outro erro qualquer, exibe e para
                                 st.error(f"Erro na IA (Arquivo {idx + 1}): {ex_chave}")
                                 break
 
@@ -160,9 +160,10 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                                     for item in itens:
                                         duplicado = False
                                         if df_existentes is not None and not df_existentes.empty:
+                                            # CORREÇÃO: .str.lower() no pandas
                                             match = df_existentes[
                                                 (df_existentes['data'].astype(str).str.strip() == str(item['data']).strip()) &
-                                                (df_existentes['descricao'].astype(str).str.strip().lower() == str(item['descricao']).strip().lower()) &
+                                                (df_existentes['descricao'].astype(str).str.strip().str.lower() == str(item['descricao']).strip().lower()) &
                                                 (abs(df_existentes['valor'] - float(item['valor'])) < 0.01) &
                                                 (df_existentes['origem'].astype(str).str.strip() == str(item['origem']).strip())
                                             ]
@@ -212,9 +213,8 @@ def render(user, conn_fin, c_fin, todas_categorias, api_key):
                     msg += f" *({total_itens_duplicados} itens repetidos foram ignorados automaticamente para evitar duplicação)*."
                 
                 st.success(msg)
-                
                 st.session_state.uploader_key += 1
-                time.sleep(2.0)
+                time.sleep(1.5)
                 st.rerun()
             else:
                 st.info("Nenhuma transação nova ou válida encontrada nos documentos fornecidos.")

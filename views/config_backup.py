@@ -4,28 +4,26 @@ from database import engine
 from sqlalchemy import text
 from google import genai
 import json
-import time
 
 def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.subheader("⚙️ Configurações e Perfil")
 
-    # --- SEÇÃO DE SALDO INICIAL DA CONTA ---
+    # --- SEÇÃO DE SALDO INICIAL DA CONTA EM FORMULÁRIO BLINDADO ---
     st.write("#### 🏦 Saldo Inicial de Partida (Conta Corrente)")
-    st.caption("Insira o saldo que você já tinha no banco antes das transações importadas para que o saldo atual bata perfeitamente:")
+    st.caption("Insira o saldo que você tinha no banco antes das transações importadas. Só salvará quando clicar no botão:")
     
     saldo_atual_param = float(get_param(user, "saldo_inicial_conta", "0.0") or 0.0)
     
-    col_s1, col_s2 = st.columns([2, 1])
-    with col_s1:
+    with st.form("form_saldo_partida"):
         novo_saldo_partida = st.number_input(
             "Saldo inicial na conta (R$):", 
             value=saldo_atual_param, 
             format="%.2f",
             key="input_saldo_partida"
         )
-    with col_s2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("💾 Salvar Saldo Inicial", type="primary"):
+        submit_saldo = st.form_submit_button("💾 Salvar Saldo Inicial", type="primary")
+        
+        if submit_saldo:
             set_param(user, "saldo_inicial_conta", str(novo_saldo_partida))
             st.success("Saldo inicial configurado com sucesso!")
             st.rerun()
@@ -75,24 +73,25 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
-    # --- SEÇÃO DE ABAS VISÍVEIS ---
+    # --- SEÇÃO DE ABAS VISÍVEIS EM FORMULÁRIO ---
     st.write("#### 🗂️ Gerenciar Abas Visíveis")
     st.caption("Escolha quais módulos extras você deseja exibir no seu menu superior:")
 
     padrao_ativado = "1" if user == "alysson" else "0"
     
-    ativ_divida = st.checkbox("📌 Dívida Fixa", value=get_param(user, "ativ_divida", padrao_ativado) == "1")
-    ativ_casa = st.checkbox("❤️ Casa / Financiamento", value=get_param(user, "ativ_casa", padrao_ativado) == "1")
-    ativ_extra = st.checkbox("🏠 Extra Casa", value=get_param(user, "ativ_extra", padrao_ativado) == "1")
-    ativ_projetos = st.checkbox("🚗 Projetos e Reformas", value=get_param(user, "ativ_projetos", padrao_ativado) == "1")
+    with st.form("form_abas_visiveis"):
+        ativ_divida = st.checkbox("📌 Dívida Fixa", value=get_param(user, "ativ_divida", padrao_ativado) == "1")
+        ativ_casa = st.checkbox("❤️ Casa / Financiamento", value=get_param(user, "ativ_casa", padrao_ativado) == "1")
+        ativ_extra = st.checkbox("🏠 Extra Casa", value=get_param(user, "ativ_extra", padrao_ativado) == "1")
+        ativ_projetos = st.checkbox("🚗 Projetos e Reformas", value=get_param(user, "ativ_projetos", padrao_ativado) == "1")
 
-    if st.button("Salvar Preferências de Abas"):
-        set_param(user, "ativ_divida", "1" if ativ_divida else "0")
-        set_param(user, "ativ_casa", "1" if ativ_casa else "0")
-        set_param(user, "ativ_extra", "1" if ativ_extra else "0")
-        set_param(user, "ativ_projetos", "1" if ativ_projetos else "0")
-        st.success("Preferências salvas! Atualizando menu...")
-        st.rerun()
+        if st.form_submit_button("💾 Salvar Preferências de Abas", type="primary"):
+            set_param(user, "ativ_divida", "1" if ativ_divida else "0")
+            set_param(user, "ativ_casa", "1" if ativ_casa else "0")
+            set_param(user, "ativ_extra", "1" if ativ_extra else "0")
+            set_param(user, "ativ_projetos", "1" if ativ_projetos else "0")
+            st.success("Preferências salvas! Atualizando menu...")
+            st.rerun()
 
     st.divider()
 
@@ -208,9 +207,11 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE CRIAÇÃO DE ABAS VIA IA ---
     st.write("#### 🤖 Criar Nova Aba Personalizada com Inteligência Artificial")
-    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de manutenções de ferramentas com peça, custo e data...")
+    with st.form("form_criar_aba_ia"):
+        descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de manutenções com item, valor e status...")
+        btn_criar_aba = st.form_submit_button("✨ Gerar e Criar Aba com IA", type="primary")
 
-    if st.button("✨ Gerar e Criar Aba com IA", type="primary"):
+    if btn_criar_aba:
         if not api_key or api_key == "SUA_CHAVE_AQUI":
             st.error("Chave da API do Gemini não configurada.")
         elif not descricao_aba_ia.strip():
