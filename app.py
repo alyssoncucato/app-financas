@@ -126,10 +126,18 @@ nomes_abas.append("⚙️ Regras e Backup")
 abas_criadas = st.tabs(nomes_abas)
 
 idx = 0
-with abas_criadas[idx]: dashboard.render(user, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS); idx += 1
-with abas_criadas[idx]: importacao.render(user, engine, engine, TODAS_CATEGORIAS, GEMINI_API_KEY); idx += 1
-with abas_criadas[idx]: importacao_nativa.render(user, engine, engine, TODAS_CATEGORIAS); idx += 1
-with abas_criadas[idx]: lancamentos.render(user, engine, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS); idx += 1
+with abas_criadas[idx]: 
+    dashboard.render(user, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS, get_param, set_param)
+    idx += 1
+with abas_criadas[idx]: 
+    importacao.render(user, engine, engine, TODAS_CATEGORIAS, GEMINI_API_KEY)
+    idx += 1
+with abas_criadas[idx]: 
+    importacao_nativa.render(user, engine, engine, TODAS_CATEGORIAS)
+    idx += 1
+with abas_criadas[idx]: 
+    lancamentos.render(user, engine, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS)
+    idx += 1
 
 if tem_divida:
     with abas_criadas[idx]: dividas_casa.render_divida(user, engine, engine, get_param, set_param); idx += 1
@@ -206,4 +214,5 @@ if not df_abas_ia.empty:
                     st.error(f"Erro ao salvar: {e}")
         idx += 1
 
-with abas_criadas[idx]: config_backup.render(user, engine, engine, get_param, set_param, GEMINI_API_KEY)
+with abas_criadas[idx]: 
+    config_backup.render(user, engine, engine, get_param, set_param, GEMINI_API_KEY)

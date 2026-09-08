@@ -9,6 +9,29 @@ import time
 def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     st.subheader("⚙️ Configurações e Perfil")
 
+    # --- SEÇÃO DE SALDO INICIAL DA CONTA ---
+    st.write("#### 🏦 Saldo Inicial de Partida (Conta Corrente)")
+    st.caption("Insira o saldo que você já tinha no banco antes das transações importadas para que o saldo atual bata perfeitamente:")
+    
+    saldo_atual_param = float(get_param(user, "saldo_inicial_conta", "0.0") or 0.0)
+    
+    col_s1, col_s2 = st.columns([2, 1])
+    with col_s1:
+        novo_saldo_partida = st.number_input(
+            "Saldo inicial na conta (R$):", 
+            value=saldo_atual_param, 
+            format="%.2f",
+            key="input_saldo_partida"
+        )
+    with col_s2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("💾 Salvar Saldo Inicial", type="primary"):
+            set_param(user, "saldo_inicial_conta", str(novo_saldo_partida))
+            st.success("Saldo inicial configurado com sucesso!")
+            st.rerun()
+
+    st.divider()
+
     # --- SEÇÃO DE EDITAR PERFIL ---
     st.write("#### 👤 Meu Perfil")
     try:
@@ -75,8 +98,6 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE GERENCIAR CATEGORIAS DE DESPESAS ---
     st.write("#### 🏷️ Gerenciar Categorias de Despesas")
-    st.caption("Adicione, renomeie ou exclua categorias de despesas.")
-
     categorias_base_sistema = [
         "ALUGUEL MÃE", "CARRO", "COMBUSTÍVEL", "COMIDA CASA", "COMIDA RUA", 
         "COMPRAS INTERNET", "EDUCAÇÃO", "FUTILIDADE", "INTERNET", "INVESTIMENTOS", 
@@ -133,10 +154,8 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     st.divider()
 
-    # --- SEÇÃO DE GERENCIAR TIPOS DE ENTRADAS / RECEITAS ---
+    # --- SEÇÃO DE GERENCIAR TIPOS DE ENTRADAS ---
     st.write("#### 💰 Gerenciar Tipos de Entradas / Receitas")
-    st.caption("Adicione, renomeie ou exclua as formas de recebimento (ex: Ganhos Fixos, Ganhos Variáveis, Salário, etc.).")
-
     entradas_base_sistema = ["Ganhos Fixos", "Ganhos Variáveis"]
     entradas_salvas_str = get_param(user, "entradas_personalizadas", "")
     if entradas_salvas_str:
@@ -189,9 +208,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
 
     # --- SEÇÃO DE CRIAÇÃO DE ABAS VIA IA ---
     st.write("#### 🤖 Criar Nova Aba Personalizada com Inteligência Artificial")
-    st.caption("Descreva o que você quer controlar. A IA criará a aba para você:")
-
-    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de recebimentos do patrão com mês, tipo, valor e status...")
+    descricao_aba_ia = st.text_area("O que você deseja gerenciar nesta aba?", placeholder="Ex: Controle de manutenções de ferramentas com peça, custo e data...")
 
     if st.button("✨ Gerar e Criar Aba com IA", type="primary"):
         if not api_key or api_key == "SUA_CHAVE_AQUI":
@@ -219,17 +236,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                     O tipo de coluna pode ser apenas: "texto", "numero" ou "status". Retorne APENAS o JSON.
                     """
                     
-                    response = None
-                    for tentativa in range(4):
-                        try:
-                            response = client.models.generate_content(model='models/gemini-3.6-flash', contents=prompt)
-                            break
-                        except Exception as ex:
-                            if ("503" in str(ex) or "UNAVAILABLE" in str(ex)) and tentativa < 3:
-                                time.sleep(3)
-                                continue
-                            raise ex
-
+                    response = client.models.generate_content(model='models/gemini-3.6-flash', contents=prompt)
                     texto_resp = response.text.strip()
                     if texto_resp.startswith("```json"):
                         texto_resp = texto_resp[7:-3].strip()
@@ -247,7 +254,7 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                                     "c": json.dumps(dados_ia.get("colunas", []))
                                 }
                             )
-                    st.success("Aba criada com sucesso pela IA! Atualizando menu...")
+                    st.success("Aba criada com sucesso pela IA!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao gerar aba com IA: {e}")
@@ -280,18 +287,10 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
                         st.error(f"Erro: {e}")
 
     st.divider()
-    st.write("#### 💾 Backup dos Dados (Supabase)")
+    st.write("#### 💾 Backup dos Dados")
     try:
         df_transacoes = pd.read_sql_query(text("SELECT * FROM transacoes WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
         csv_data = df_transacoes.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv", type="secondary")
+        st.download_button("📥 Baixar Backup de Transações (.csv)", data=csv_data, file_name=f"backup_transacoes_{user}.csv", mime="text/csv")
     except Exception:
         st.info("Ainda não há transações para exportar.")
-
-    st.divider()
-    try:
-        df_regras = pd.read_sql_query(text("SELECT id, termo_chave AS \"Termo\", categoria_destino AS \"Categoria\" FROM regras_categorias WHERE LOWER(usuario) = LOWER(:u)"), engine, params={"u": user})
-        if not df_regras.empty:
-            st.dataframe(df_regras, use_container_width=True)
-    except Exception:
-        pass
