@@ -80,12 +80,14 @@ def render(user, conn_fin, c_fin, get_param, set_param, api_key):
     padrao_ativado = "1" if user == "alysson" else "0"
     
     with st.form("form_abas_visiveis"):
+        ativ_viagem = st.checkbox("✈️ Planejamento de Viagem", value=get_param(user, "ativ_viagem", "1") == "1")
         ativ_divida = st.checkbox("📌 Dívida Fixa", value=get_param(user, "ativ_divida", padrao_ativado) == "1")
         ativ_casa = st.checkbox("❤️ Casa / Financiamento", value=get_param(user, "ativ_casa", padrao_ativado) == "1")
         ativ_extra = st.checkbox("🏠 Extra Casa", value=get_param(user, "ativ_extra", padrao_ativado) == "1")
         ativ_projetos = st.checkbox("🚗 Projetos e Reformas", value=get_param(user, "ativ_projetos", padrao_ativado) == "1")
 
         if st.form_submit_button("💾 Salvar Preferências de Abas", type="primary"):
+            set_param(user, "ativ_viagem", "1" if ativ_viagem else "0")
             set_param(user, "ativ_divida", "1" if ativ_divida else "0")
             set_param(user, "ativ_casa", "1" if ativ_casa else "0")
             set_param(user, "ativ_extra", "1" if ativ_extra else "0")

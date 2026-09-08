@@ -91,6 +91,28 @@ def inicializar_bancos():
                         dados_json TEXT
                     );
                 """))
+                # Tabelas para o módulo de Viagens
+                connection.execute(text("""
+                    CREATE TABLE IF NOT EXISTS viagens_lista (
+                        id SERIAL PRIMARY KEY,
+                        usuario TEXT NOT NULL,
+                        destino TEXT NOT NULL,
+                        data_viagem TEXT,
+                        precisa_passaporte_visto TEXT DEFAULT '0'
+                    );
+                """))
+                connection.execute(text("""
+                    CREATE TABLE IF NOT EXISTS viagens_itens (
+                        id SERIAL PRIMARY KEY,
+                        viagem_id INT NOT NULL,
+                        categoria TEXT NOT NULL,
+                        item TEXT NOT NULL,
+                        valor_estimado DOUBLE PRECISION DEFAULT 0.0,
+                        quem_paga TEXT DEFAULT 'Dividido',
+                        status TEXT DEFAULT 'Pendente',
+                        obs TEXT
+                    );
+                """))
     except Exception as e:
         st.error(f"Erro ao inicializar o banco de dados no Supabase: {e}")
 

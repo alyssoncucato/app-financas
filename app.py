@@ -2,7 +2,7 @@ import streamlit as st
 import json
 from sqlalchemy import text
 from database import inicializar_bancos, engine, get_param, set_param
-from views import dashboard, importacao, importacao_nativa, lancamentos, dividas_casa, projetos, config_backup, metas
+from views import dashboard, importacao, importacao_nativa, lancamentos, dividas_casa, projetos, config_backup, metas, viagem
 import pandas as pd
 
 st.set_page_config(page_title="Minhas Finanças", page_icon="💰", layout="wide")
@@ -95,6 +95,7 @@ with col_topo2:
 st.divider()
 
 padrao_ativado = "1" if user == "alysson" else "0"
+tem_viagem = get_param(user, "ativ_viagem", "1") == "1"
 tem_divida = get_param(user, "ativ_divida", padrao_ativado) == "1"
 tem_casa = get_param(user, "ativ_casa", padrao_ativado) == "1"
 tem_extra = get_param(user, "ativ_extra", padrao_ativado) == "1"
@@ -111,6 +112,7 @@ except Exception:
     df_abas_ia = pd.DataFrame()
 
 nomes_abas = ["📊 Dashboard", "⚡ Importar com IA", "📥 Importação Nativa", "📋 Lançamentos e Edição"]
+if tem_viagem: nomes_abas.append("✈️ Viagem")
 if tem_divida: nomes_abas.append("📌 Dívida Fixa")
 if tem_casa: nomes_abas.append("❤️ Casa / Financiamento")
 if tem_extra: nomes_abas.append("🏠 Extra Casa")
@@ -139,6 +141,8 @@ with abas_criadas[idx]:
     lancamentos.render(user, engine, engine, CATEGORIAS_DESPESAS, CATEGORIAS_ENTRADAS)
     idx += 1
 
+if tem_viagem:
+    with abas_criadas[idx]: viagem.render(user); idx += 1
 if tem_divida:
     with abas_criadas[idx]: dividas_casa.render_divida(user, engine, engine, get_param, set_param); idx += 1
 if tem_casa:
