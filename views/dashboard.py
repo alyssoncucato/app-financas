@@ -34,7 +34,6 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
     except Exception:
         saldo_partida = 0.0
 
-    # No saldo físico da conta corrente, apenas ignoramos transferências internas (RDB)
     df_cc_historico = df[(df['origem'] == 'EXTRATO_CONTA') & (~df['categoria'].isin(["Ignorar"]))]
     total_entradas_historico = df_cc_historico[df_cc_historico['tipo'] == 'ENTRADA']['valor'].sum()
     total_saidas_historico = df_cc_historico[df_cc_historico['tipo'] == 'SAÍDA']['valor'].sum()
@@ -81,24 +80,20 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
 
     st.divider()
 
-    # --- FILTRO BLINDADO CONTRA DUPLICIDADES E PAGAMENTOS DE FATURA ---
-    # Remove itens marcados como 'Ignorar' (ex: Caixinhas/RDB)
+    # --- FILTRO CONTRA DUPLICIDADES E PAGAMENTOS DE FATURA ---
     df_base_calc = df_final[~df_final['categoria'].isin(["Ignorar"])]
 
     if tipo_visao == "Visão Geral (Consolidada)":
-        # 1. Ignora o débito de pagamento de fatura na conta corrente
         mask_pgto_cc = (df_base_calc['origem'] == 'EXTRATO_CONTA') & (
             (df_base_calc['categoria'].str.upper().isin(["PAGAMENTO FATURA"])) |
             (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO DE FATURA|PAGTO FATURA|PGTO FATURA|FATURA CARTAO"))
         )
-        # 2. Ignora o crédito de 'pagamento recebido' que abate a fatura do cartão
         mask_pgto_cartao = (df_base_calc['origem'] == 'FATURA_CARTAO') & (
             (df_base_calc['categoria'].str.upper().isin(["PAGAMENTO FATURA"])) |
             (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO RECEBIDO"))
         )
         df_calculo = df_base_calc[~(mask_pgto_cc | mask_pgto_cartao)]
     elif "Cartão" in tipo_visao:
-        # No cartão, esconde o crédito de pagamento recebido para mostrar o total real de compras
         mask_pgto_cartao = (df_base_calc['descricao'].str.upper().str.contains("PAGAMENTO RECEBIDO")) | (df_base_calc['categoria'].str.upper() == "PAGAMENTO FATURA")
         df_calculo = df_base_calc[~mask_pgto_cartao]
     else:
@@ -117,7 +112,7 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
     c3.metric("⚖️ Balanço do Período", f"R$ {resultado_mes:,.2f}", delta=f"{resultado_mes:,.2f}")
     c4.metric("🏦 Saldo Real em Conta (Hoje)", f"R$ {saldo_atual_em_conta:,.2f}")
 
-    # --- SEÇÃO DE PREVISÃO PARA O FINAL DO MÊS ---
+    # --- PREVISÃO PARA O FINAL DO MÊS ---
     hoje = datetime.now()
     e_mes_atual = (mes_sel == hoje.strftime('%m/%Y'))
 
@@ -127,7 +122,6 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
         dias_passados = max(hoje.day, 1)
         dias_restantes = max(dias_no_mes - dias_passados, 0)
 
-        # Ritmo diário de gastos reais do mês
         media_gasto_dia = despesas / dias_passados
         gasto_projetado_fim_mes = despesas + (media_gasto_dia * dias_restantes)
         resultado_projetado_mes = receitas - gasto_projetado_fim_mes
@@ -141,12 +135,12 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
 
     st.divider()
 
-    # --- PROCESSAMENTO POR CATEGORIA ---
-    todas_as_cats = list(set(categorias_despesas + categorias_entradas + ["Não Categorizado", "Estorno"]))
+    # --- IMPACTO LÍQUIDO POR CATEGORIA ---
+    todas_as_cats = list(set(categorias_despesas + categorias_entradas + list(df_calculo['categoria'].unique())))
     resumo_cat_list = []
     
     for cat in todas_as_cats:
-        if cat in ["Ignorar", "PAGAMENTO FATURA"]:
+        if cat in ["Ignorar", "PAGAMENTO FATURA"] or not str(cat).strip():
             continue
         df_cat = df_calculo[df_calculo['categoria'] == cat]
         if not df_cat.empty:
@@ -184,7 +178,7 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
 
     st.divider()
 
-    # --- ÁRVORE DETALHADA ---
+    # --- DETALHAMENTO EM ÁRVORE LIMPO (SEM HTML QUEBRADO) ---
     st.markdown("### 📂 Detalhamento por Categoria e Estabelecimento")
     df_validos = df_calculo.copy()
 
@@ -193,24 +187,21 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
         return
 
     df_validos['estabelecimento'] = df_validos['descricao'].str.strip().str.upper()
-    cats_presentes = sorted(df_validos['categoria'].unique())
+    cats_presentes = sorted([c for c in df_validos['categoria'].unique() if c not in ["Ignorar", "PAGAMENTO FATURA"]])
 
     for cat in cats_presentes:
-        if cat in ["Ignorar", "PAGAMENTO FATURA"]:
-            continue
         df_cat_itens = df_validos[df_validos['categoria'] == cat]
         t_saidas_cat = df_cat_itens[df_cat_itens['tipo'] == 'SAÍDA']['valor'].sum()
         t_entradas_cat = df_cat_itens[df_cat_itens['tipo'] == 'ENTRADA']['valor'].sum()
         liquido_cat = t_entradas_cat - t_saidas_cat
 
-        cor_liq = "#2ecc71" if liquido_cat >= 0 else "#e74c3c"
         sinal_liq = "+" if liquido_cat > 0 else ""
         
         with st.expander(f"📁 {cat} (Líquido: R$ {sinal_liq}{liquido_cat:,.2f})", expanded=False):
             st.markdown(
-                f"**Entrou:** <span style='color:#2ecc71; font-weight:bold;'>R$ {t_entradas_cat:,.2f}</span> | "
-                f"**Saiu:** <span style='color:#e74c3c; font-weight:bold;'>R$ {t_saidas_cat:,.2f}</span> | Total de {len(df_cat_itens)} lançamentos",
-                unsafe_allow_html=True
+                f"**Entrou:** :green[R$ {t_entradas_cat:,.2f}] &nbsp;|&nbsp; "
+                f"**Saiu:** :red[R$ {t_saidas_cat:,.2f}] &nbsp;|&nbsp; "
+                f"**Total:** {len(df_cat_itens)} lançamentos"
             )
             st.divider()
 
@@ -222,9 +213,12 @@ def render(user, conn_fin, categorias_despesas, categorias_entradas, get_param=N
                 with st.expander(f"🔹 {estab} — R$ {t_estab:,.2f} ({len(df_estab_itens)}x)"):
                     for _, row in df_estab_itens.iterrows():
                         data_fmt = pd.to_datetime(row['data']).strftime('%d/%m/%Y') if pd.notna(row['data']) else "Sem data"
-                        val_cor = "#2ecc71" if row['tipo'] == 'ENTRADA' else "#e74c3c"
+                        tipo_cor = ":green[ENTRADA]" if row['tipo'] == 'ENTRADA' else ":red[SAÍDA]"
+                        val_formatado = f":green[R$ {row['valor']:,.2f}]" if row['tipo'] == 'ENTRADA' else f":red[R$ {row['valor']:,.2f}]"
+                        
                         st.markdown(
-                            f"• **Data:** {data_fmt} | **Tipo:** {row['tipo']} | "
-                            f"**Valor:** <span style='color:{val_cor}; font-weight:bold;'>R$ {row['valor']:,.2f}</span> | Origem: `{row['origem']}`",
-                            unsafe_allow_html=True
+                            f"• **Data:** {data_fmt} &nbsp;|&nbsp; "
+                            f"**Tipo:** {tipo_cor} &nbsp;|&nbsp; "
+                            f"**Valor:** {val_formatado} &nbsp;|&nbsp; "
+                            f"**Origem:** `{row['origem']}`"
                         )
